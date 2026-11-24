@@ -59,6 +59,8 @@ function publication(citation) {
  * record, which adds its title and number inside the book. Returns plain text.
  */
 export function chicagoWork(citation, record = null, { chapterAuthors = [] } = {}) {
+  // A citation derived from the record (no structured one exists) is shown as the record prints it, never reformatted.
+  if (citation.derived === true && typeof citation.printed === 'string') return strip(citation.printed);
   const authors = (citation.creators ?? []).filter((c) => ['author', 'editor'].includes(c.role));
   const isEdited = authors.length > 0 && authors.every((c) => c.role === 'editor');
   const who = authors.length > 0 ? `${names(authors)}${isEdited ? (authors.length > 1 ? ', eds' : ', ed') : ''}.` : '';
@@ -87,6 +89,14 @@ export function chicagoWork(citation, record = null, { chapterAuthors = [] } = {
         : '';
       const pages = citation.pages ?? container?.pages;
       const doi = citation.identifiers?.doi ? ` https://doi.org/${citation.identifiers.doi}.` : '';
+      // A review with no title of its own is cited as "Review of Title, by Author" (Chicago), never with an empty pair of quotation marks.
+      const reviewed = (citation.reviewed_works ?? []).filter((w) => w?.title);
+      if (citation.type === 'review' && title === '' && reviewed.length > 0) {
+        const of = reviewed.map((w) => `${strip(w.title)}${w.author ? `, by ${strip(w.author)}` : ''}`).join('; ');
+        return `${who} Review of ${of}. ${journal}${year(citation) ? ` (${year(citation)})` : ''}${pages ? `: ${pages}` : ''}.${doi}`
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
       return `${who} “${title}${subtitle}.” ${journal}${year(citation) ? ` (${year(citation)})` : ''}${pages ? `: ${pages}` : ''}.${doi}`
         .replace(/\s+/g, ' ')
         .trim();

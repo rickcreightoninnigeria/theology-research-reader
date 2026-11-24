@@ -55,7 +55,7 @@ export function describeTarget(ctx, id) {
       title: item.name,
       key: id,
       status: t(`badge_status_${item.status}`),
-      excerpt: clip([item.definition, item.in_odonovan].filter(Boolean).map(plain).join('\n\n')),
+      excerpt: clip([item.definition, item.in_subject ?? item.in_odonovan].filter(Boolean).map(plain).join('\n\n')),
     };
   if (kind === 'position')
     return { title: item.title, key: id, status: t(`badge_status_${item.status}`), excerpt: clip(plain(item.summary)) };

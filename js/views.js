@@ -4,7 +4,7 @@
 import { compareItems, developmentAmong, positionsOn, MAX_ITEMS } from './compare.js';
 import { actions, authoredBadges, claimItem, metaLine, provenanceNote } from './pages.js';
 import { centuryLabel, filterEvents, groupByCentury, groupOf, GROUP_NAMES, yearText } from './timeline.js';
-import { badge, el, linkTo, richText } from './ui.js';
+import { badge, el, linkTo, richText, titleRow } from './ui.js';
 
 const DEVELOPMENT = new Set(['republished_as', 'develops', 'elaborates', 'revises', 'reverses']);
 
@@ -178,7 +178,7 @@ export function renderPosition(ctx, id) {
   const p = data.positions.get(id);
   if (p === undefined) return el(doc, 'section', {}, el(doc, 'h1', { id: 'page-heading', text: t('not_found') }));
   const main = el(doc, 'article');
-  main.append(el(doc, 'h1', { id: 'page-heading', text: p.title }), authoredBadges(ctx, p), provenanceNote(ctx, p));
+  main.append(titleRow(doc, el(doc, 'h1', { id: 'page-heading', text: p.title }), authoredBadges(ctx, p)));
   if (p.status === 'suggested')
     main.append(
       el(doc, 'p', { class: 'warning', role: 'note', id: 'suggested-note', text: t('suggested_position_note') }),
@@ -241,6 +241,7 @@ export function renderPosition(ctx, id) {
       },
     }),
   );
+  main.append(provenanceNote(ctx, p));
   return main;
 }
 

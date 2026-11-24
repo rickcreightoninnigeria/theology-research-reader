@@ -1,0 +1,438 @@
+/* The desktop layer. Loaded only for a wide window with a mouse (see the media attribute on its <link> in index.html), so the phone and
+   tablet versions are untouched. Nothing here changes the structure or the words on the page: it makes the same page quieter.
+
+   The status markers ("confirmed by an editor", "AI-assisted draft" and so on) become small monochrome symbols that sit in a column at the
+   right of each list row. Their words stay in the page for screen readers and for copying; hovering a symbol shows the full explanation.
+   The shapes differ as well as the colours, so nothing depends on colour alone. */
+
+:root {
+  --ok: #3b6f52;
+  --lead: #8a5d12;
+  --ink-soft: #6b665c;
+  --hairline: #e6e1d6;
+  --tip-bg: #26282d;
+  --tip-fg: #f3f0e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ok: #86c4a1;
+    --lead: #dcae5c;
+    --ink-soft: #8f8a80;
+    --hairline: #303338;
+    --tip-bg: #ece9e2;
+    --tip-fg: #1b1c1f;
+  }
+}
+
+/* Reading comfort */
+body {
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+#view:focus {
+  outline: none;
+}
+#status {
+  padding: 0.3rem 2rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-height: 1.4rem;
+}
+main {
+  max-width: 50rem;
+  padding: 1.75rem 2rem 4rem;
+}
+h1 {
+  font-size: 1.9rem;
+  letter-spacing: -0.01em;
+  margin: 0.4rem 0 0.9rem;
+}
+main h2 {
+  font-size: 1.3rem;
+  margin: 2.2rem 0 0.7rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--hairline);
+  letter-spacing: -0.005em;
+}
+main h3 {
+  font-size: 1.08rem;
+  margin: 1.5rem 0 0.4rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  transition: text-decoration-color 0.12s;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+header {
+  padding: 0.7rem 2rem;
+  border-bottom-color: var(--hairline);
+}
+header nav {
+  gap: 1.4rem;
+}
+header nav a {
+  text-decoration: none;
+  color: var(--muted);
+}
+header nav a:hover,
+header nav a[aria-current] {
+  color: var(--fg);
+}
+.brand {
+  letter-spacing: 0.01em;
+}
+main ul,
+main ol {
+  padding-left: 1.4rem;
+}
+main li {
+  margin: 0.3rem 0;
+}
+button,
+select {
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--card);
+  color: var(--fg);
+  min-height: 2.25rem;
+  padding: 0.25rem 0.8rem;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+button:hover,
+select:hover {
+  border-color: var(--muted);
+}
+.open-at {
+  min-height: 0;
+  padding: 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* A list row with markers: the text on the left, the markers in a column at the right edge */
+ul > li:has(> .badge) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.15rem;
+}
+ul > li:has(> .badge) > .badge:not(.badge ~ .badge) {
+  margin-left: auto;
+  padding-left: 1rem;
+}
+
+/* The markers themselves. In a list row each is a bare symbol (the words stay in the page for screen readers and copying). Elsewhere, for
+   example the row under a page title, there is room, so the symbol keeps its words, only quieter than the phone's boxed labels. */
+.badge {
+  position: relative;
+  display: inline-block;
+  padding: 0 0.2em;
+  border: 0;
+  background: none;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.3;
+  cursor: help;
+  white-space: nowrap;
+}
+li > .badge,
+.title-row .badge {
+  min-width: 1.4em;
+  font-size: 0; /* hides the words visually only */
+  color: var(--muted);
+  text-align: center;
+  line-height: 1;
+}
+.badges {
+  gap: 0.2rem 0.9rem;
+}
+.badge::before {
+  margin-right: 0.35em;
+}
+li > .badge::before,
+.title-row .badge::before {
+  margin-right: 0;
+}
+.badge .glyph {
+  display: none;
+}
+.badge::before {
+  font-size: 0.95rem;
+  font-style: normal;
+  font-variant-emoji: text;
+  color: var(--ink-soft);
+}
+.badge:hover::before {
+  color: var(--fg);
+}
+
+/* status */
+.badge-status-confirmed::before,
+.badge-status-editorially_confirmed::before,
+.badge-status-explicit::before,
+.badge-person-confirmed::before {
+  content: '✓';
+  color: var(--ok);
+}
+.badge-status-editorially_identified::before {
+  content: '◐';
+  color: var(--ok);
+}
+.badge-status-suggested::before,
+.badge-person-suggested::before {
+  content: '○';
+  color: var(--lead);
+}
+.badge-ai::before {
+  content: '✦';
+  color: var(--lead);
+}
+/* quotations, pages: a quotation mark or a pilcrow, then the state of the checking */
+.badge-verification-print_checked::before {
+  content: '❝✓';
+}
+.badge-verification-text_checked::before {
+  content: '❝◐';
+}
+.badge-verification-unchecked::before {
+  content: '❝○';
+}
+.badge-verification-unstated::before {
+  content: '❝–';
+}
+.badge-pages-checked::before {
+  content: '¶✓';
+}
+.badge-pages-checked_in_text::before {
+  content: '¶◐';
+}
+.badge-pages-estimated::before {
+  content: '¶≈';
+}
+.badge-pages-unchecked::before {
+  content: '¶○';
+}
+.badge-pages-unstated::before {
+  content: '¶–';
+}
+.badge-verification-unchecked::before,
+.badge-pages-unchecked::before,
+.badge-pages-estimated::before {
+  color: var(--lead);
+}
+.badge-verification-print_checked::before,
+.badge-pages-checked::before {
+  color: var(--ok);
+}
+/* what is shown, who wrote it, how a step is known */
+.badge-state-listed::before {
+  content: '▭';
+}
+.badge-state-summarised::before {
+  content: '▤';
+}
+.badge-role-odonovan_own::before {
+  content: '◆';
+}
+.badge-role-scholarship::before {
+  content: '◇';
+}
+.badge-role-sourcebook::before {
+  content: '❡';
+}
+.badge-basis-explicit::before {
+  content: '＝';
+}
+.badge-basis-reconstructed::before {
+  content: '≈';
+  color: var(--lead);
+}
+
+/* The explanation, on hover. It opens to the left because the markers sit at the right edge. */
+.badge[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: -0.2rem;
+  bottom: calc(100% + 0.4rem);
+  z-index: 20;
+  width: max-content;
+  max-width: 20rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.4rem;
+  background: var(--tip-bg);
+  color: var(--tip-fg);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  font-style: normal;
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+  pointer-events: none;
+}
+
+/* In the "what the labels mean" list the words are already on the page, so no tooltip */
+dt > .badge[data-tip]:hover::after {
+  display: none;
+}
+
+/* Covers: a quiet shadow, as on a desk */
+.cover {
+  width: 9rem;
+  margin: 0.2rem 0 1rem 2rem;
+  border-radius: 2px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.18),
+    0 6px 16px rgb(0 0 0 / 0.14);
+}
+.cover-small {
+  width: 5.5rem;
+}
+.cover-thumb {
+  width: 1.7rem;
+  height: 2.5rem;
+  border-radius: 1px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  align-self: center;
+}
+
+/* Reading measure and field labels: about 70 characters to a line, and small quiet labels above each field */
+main p,
+main dd {
+  max-width: 41rem;
+}
+main dl dt {
+  margin: 1.3rem 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+main dl dd {
+  margin: 0 0 0.4rem;
+}
+#status-meanings dt {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: inherit;
+}
+
+/* The foot of a record: its bookkeeping, set small and quiet */
+.record-details {
+  margin-top: 3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.record-details h2 {
+  border-bottom: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin: 1rem 0 0;
+}
+.record-details dt {
+  margin-top: 0.7rem;
+}
+
+/* A page title with its markers at the right, as bare symbols (hover for the words) */
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+.title-row h1 {
+  flex: 1;
+  min-width: 0;
+}
+.title-row .badges {
+  flex: none;
+  margin: 1.1rem 0 0;
+  gap: 0.2rem 0.5rem;
+}
+.title-row .badge {
+  font-size: 0;
+}
+.title-row .badge::before {
+  font-size: 1.05rem;
+}
+
+/* Who drafted and reviewed an item: the last line of its page */
+.provenance {
+  margin-top: 2.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.85rem;
+}
+
+/* Generated covers: the same shape as a real one, a little quieter */
+svg.cover-gen {
+  display: block;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+svg.cover.cover-gen {
+  float: right;
+  width: 9rem;
+  height: 13.5rem;
+}
+svg.cover.cover-small.cover-gen {
+  width: 5.5rem;
+  height: 8.25rem;
+}
+svg.cover-thumb.cover-gen {
+  display: inline-block;
+  width: 1.7rem;
+  height: 2.55rem;
+  margin-right: 0.5rem;
+  align-self: center;
+  vertical-align: middle;
+}
+
+/* A publication row: thumbnail, then the title with its author and year as one block, then the markers */
+.publist li > .row-text {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.publist li > .row-text .meta {
+  display: block;
+  font-size: 0.9rem;
+}
+.publist li {
+  margin: 0.55rem 0;
+  align-items: center;
+}
+
+/* A claim's own markers: the record's page checking is already shown under the title, so it is not repeated on every claim */
+#record-claims > li > .badge {
+  display: none;
+}
+
+/* "Ready." is only for screen readers; the status line shows when there is something to say */
+#status[data-state='quiet'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  padding: 0;
+  min-height: 0;
+}

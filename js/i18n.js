@@ -25,6 +25,8 @@ export function createI18n({
   const store = storage ?? (typeof localStorage === 'undefined' ? null : localStorage);
   let strings = {};
   let uiLanguage = DEFAULT_UI_LANGUAGE;
+  // Values every string may use without being given them each time, such as {subject}: the author a collection is about.
+  let defaults = {};
 
   const readSettings = () => {
     try {
@@ -59,7 +61,12 @@ export function createI18n({
         onMissing(key);
         return key;
       }
-      return value.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match));
+      const all = { ...defaults, ...params };
+      return value.replace(/\{(\w+)\}/g, (match, name) => (name in all ? String(all[name]) : match));
+    },
+    /** Sets the values strings may use by default (for example { subject: 'O’Donovan', subject_full: 'Oliver O’Donovan' }). */
+    setDefaults(values) {
+      defaults = { ...values };
     },
     get uiLanguage() {
       return uiLanguage;

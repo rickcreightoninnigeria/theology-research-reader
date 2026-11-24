@@ -37,7 +37,13 @@ import { renderDiagnostics, renderSettings, renderSources } from './viewer.js';
 import { importBlock } from './import-ui.js';
 import { loadMyLibrary } from './my-library.js';
 import { backupBlock, renderProject, renderWorkspace } from './workspace-ui.js';
-import { needsHomeScreenHint, registerServiceWorker, requestDurableStorage } from './web-app.js';
+import {
+  isOwnComputer,
+  needsHomeScreenHint,
+  registerServiceWorker,
+  requestDurableStorage,
+  watchForNewBuild,
+} from './web-app.js';
 
 const doc = document;
 const appRoot = new URL('../', import.meta.url);
@@ -57,8 +63,19 @@ doc.querySelector('.skip')?.addEventListener('click', (event) => {
 
 const statusEl = doc.getElementById('status');
 const viewEl = doc.getElementById('view');
-const setStatus = (text) => {
+const setStatus = (text, { quiet = false } = {}) => {
   statusEl.textContent = text;
+  // "Ready." is for screen readers; the desktop stylesheet shows other messages only.
+  statusEl.dataset.state = quiet ? 'quiet' : 'message';
+};
+
+/** The bar at the top for "a new version is ready" (own computer only). `onClick` takes the new version up. */
+const showUpdateBar = (textKey, onClick) => {
+  const bar = doc.getElementById('update-ready');
+  if (bar === null) return;
+  bar.querySelector('span').textContent = tt(textKey);
+  bar.hidden = false;
+  bar.querySelector('button').onclick = onClick;
 };
 
 installGlobalHandlers(window, errorLog, (entry) =>
@@ -317,15 +334,26 @@ async function start() {
   }
   state.session = session;
   state.ctx = await loadContext(session.version, session.meta);
+  // Strings that name the author a collection is about ("In {subject}") use the collection's own subject.
+  const site = state.ctx.data?.site ?? {};
+  i18n.setDefaults({ subject: site.subjectShort ?? site.subject ?? '', subject_full: site.subject ?? '' });
   // Only on the reader's own machine: a private map of the reader's Zotero and Calibre copies (never on a public site).
   state.myLibrary = await loadMyLibrary({ baseUrl });
   if (session.meta.closedTesting) doc.getElementById('test-banner').hidden = false;
   doc.documentElement.dataset.collection = session.version;
-  setStatus(navigator.onLine ? tt('status_ready') : tt('status_offline_ready'));
+  setStatus(navigator.onLine ? tt('status_ready') : tt('status_offline_ready'), { quiet: true });
   router.show();
   doc.documentElement.dataset.ready = '1';
 
-  state.serviceWorker = await registerServiceWorker({ base });
+  state.serviceWorker = await registerServiceWorker({
+    base,
+    onRegistration: (registration) => {
+      // On the reader's own computer a new build of the app can be taken up with one click (elsewhere it waits for the windows to close).
+      const watcher = watchForNewBuild(registration, {
+        onReady: () => showUpdateBar('update_ready', () => watcher.reload()),
+      });
+    },
+  });
   state.persisted = await requestDurableStorage();
   if (needsHomeScreenHint()) doc.getElementById('ios-hint').hidden = false;
 
@@ -335,6 +363,8 @@ async function start() {
     state.pending = result.version;
     doc.documentElement.dataset.pending = result.version;
     setStatus(tt('status_update_ready'));
+    // On the reader's own computer a downloaded collection can be taken up at once: a restart promotes it.
+    if (isOwnComputer()) showUpdateBar('update_ready_collection', () => globalThis.location.reload());
   } else if (result.status === 'error') errorLog.record(new Error(result.reason), 'update');
   doc.documentElement.dataset.updateChecked = result.status;
 }

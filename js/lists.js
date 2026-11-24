@@ -2,10 +2,10 @@
 // They read from `ctx` ({ doc, t, data, href, ... }); the lists all lead to the same records the search finds.
 
 import { importBlock } from './import-ui.js';
-import { aiBadge, badge, el, linkTo } from './ui.js';
+import { aiBadge, badge, coverOrPlaceholder, el, linkTo } from './ui.js';
 
 const ROLE_ORDER = ['odonovan_own', 'scholarship', 'sourcebook'];
-const KIND_ORDER = ['o_donovan', 'anchor', 'engaged', 'historical', 'body', 'scholar'];
+const KIND_ORDER = ['o_donovan', 'subject', 'anchor', 'engaged', 'historical', 'body', 'scholar'];
 
 export const ENTRY_TILES = [
   { name: 'publications', path: '/publications', title: 'tile_publications', text: 'tile_publications_text' },
@@ -54,7 +54,15 @@ export function renderHome(ctx, { last = null, online = true, pending = null } =
   main.append(form);
 
   const tiles = el(doc, 'ul', { id: 'entry-tiles', class: 'tiles' });
-  for (const tile of ENTRY_TILES) {
+  const has = {
+    publications: true,
+    themes: data.concepts.size > 0 || Object.keys(data.hubs).length > 0,
+    arguments: data.arguments.size > 0,
+    thinkers: data.thinkers.size > 0,
+    timeline: (data.timeline.events?.length ?? 0) > 0,
+    pathways: data.pathways.size > 0,
+  };
+  for (const tile of ENTRY_TILES.filter((x) => has[x.name] !== false)) {
     tiles.append(
       el(
         doc,
@@ -65,7 +73,9 @@ export function renderHome(ctx, { last = null, online = true, pending = null } =
           'a',
           { href: ctx.href(tile.path), 'data-link': true, class: 'tile' },
           el(doc, 'strong', { text: t(tile.title) }),
-          el(doc, 'span', { text: t(tile.text) }),
+          el(doc, 'span', {
+            text: t(tile.name === 'thinkers' && !data.site.subject ? 'tile_thinkers_text_generic' : tile.text),
+          }),
         ),
       ),
     );
@@ -113,7 +123,10 @@ export function renderHome(ctx, { last = null, online = true, pending = null } =
 export function renderStart(ctx) {
   const { doc, t, data } = ctx;
   const main = el(doc, 'article', { id: 'start' });
-  main.append(heading(doc, t('start_title')), el(doc, 'p', { text: t('start_intro') }));
+  main.append(
+    heading(doc, t('start_title')),
+    el(doc, 'p', { text: t(data.site.subject ? 'start_intro' : 'start_intro_generic') }),
+  );
   main.append(
     el(doc, 'h2', { text: t('start_pathways') }),
     el(
@@ -133,13 +146,16 @@ export function renderPublications(ctx) {
   const main = el(doc, 'section', { id: 'publications' });
   main.append(heading(doc, t('tile_publications')));
   const bySource = [...data.sources.values()].map((s) => ({ source: s, record: data.records.get(s.id) }));
-  for (const role of ROLE_ORDER) {
+  // Without a subject there are no roles: one list of every source.
+  for (const role of data.site.subject ? ROLE_ORDER : ['all']) {
     const group = sorted(
-      bySource.filter((x) => (x.record?.role ?? 'scholarship') === role),
+      bySource.filter((x) => role === 'all' || (x.record?.role ?? 'scholarship') === role),
       (x) => `${x.source.citation?.dates?.original ?? 9999}${x.source.id}`,
     );
     if (group.length === 0) continue;
-    main.append(el(doc, 'h2', { text: `${t(`badge_role_${role}`)} (${group.length})` }));
+    main.append(
+      el(doc, 'h2', { text: `${role === 'all' ? t('pub_all_sources') : t(`badge_role_${role}`)} (${group.length})` }),
+    );
     const list = el(doc, 'ul', { class: 'publist' });
     for (const { source, record } of group) {
       const creators = (source.citation?.creators ?? []).map((c) => c.display_name ?? c.name).join(', ');
@@ -148,12 +164,18 @@ export function renderPublications(ctx) {
           doc,
           'li',
           {},
-          linkTo(doc, ctx, source.id),
-          ' ',
-          el(doc, 'span', {
-            class: 'meta',
-            text: `${creators}${source.citation?.dates?.original ? ` (${source.citation.dates.original})` : ''}`,
-          }),
+          coverOrPlaceholder(ctx, source.id, 'cover-thumb'),
+          el(
+            doc,
+            'span',
+            { class: 'row-text' },
+            linkTo(doc, ctx, source.id),
+            ' ',
+            el(doc, 'span', {
+              class: 'meta',
+              text: `${creators}${source.citation?.dates?.original ? ` (${source.citation.dates.original})` : ''}`,
+            }),
+          ),
           ' ',
           badge(doc, t, 'state', source.state),
           record ? [' ', badge(doc, t, 'verification', record.verification?.quotations ?? 'unstated')] : null,

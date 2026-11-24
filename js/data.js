@@ -6,6 +6,33 @@ const RECEPTION_TYPES = new Set(['engages', 'criticises', 'cites', 'draws_upon',
 
 const byKey = (list, key) => new Map(list.map((item) => [item[key], item]));
 
+/** How far a status can be trusted, best first: the one kept when several relationships join the same two things. */
+const STATUS_RANK = ['confirmed', 'editorially_confirmed', 'explicit', 'editorially_identified', 'suggested'];
+
+/**
+ * One entry per thing at the other end. Several relationships can join the same two things (one for each record that mentions a person,
+ * for example); the page lists the thing once, with the most trustworthy status among them and how many relationships there were.
+ */
+export function mergeSameTarget(items) {
+  const byTarget = new Map();
+  for (const item of items) {
+    const kept = byTarget.get(item.otherId);
+    if (kept === undefined) {
+      byTarget.set(item.otherId, { ...item, count: 1 });
+      continue;
+    }
+    kept.count += 1;
+    if (
+      STATUS_RANK.indexOf(item.status) !== -1 &&
+      STATUS_RANK.indexOf(item.status) < STATUS_RANK.indexOf(kept.status)
+    ) {
+      kept.status = item.status;
+    }
+    kept.derived = kept.derived && item.derived;
+  }
+  return [...byTarget.values()];
+}
+
 export function createData(files) {
   const records = byKey(files.records, 'key');
   const sources = byKey(files.sources, 'id');
@@ -54,7 +81,7 @@ export function createData(files) {
     return null;
   }
 
-  const sourceTitle = (id) => sources.get(id)?.citation?.title ?? id;
+  const sourceTitle = (id) => sources.get(id)?.citation?.title ?? sources.get(id)?.displayTitle ?? id;
 
   /** A readable label for any id. */
   function titleOf(id) {
@@ -63,7 +90,7 @@ export function createData(files) {
     const { kind, item } = found;
     switch (kind) {
       case 'source':
-        return item.citation?.title ?? id;
+        return item.citation?.title ?? item.displayTitle ?? id;
       case 'record':
         return item.title ?? sourceTitle(item.source);
       case 'claim': {
@@ -148,7 +175,10 @@ export function createData(files) {
     }
     return [...groups]
       .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([reading, items]) => ({ reading, items: items.sort((x, y) => (x.otherId < y.otherId ? -1 : 1)) }));
+      .map(([reading, items]) => ({
+        reading,
+        items: mergeSameTarget(items).sort((x, y) => (x.otherId < y.otherId ? -1 : 1)),
+      }));
   }
 
   /** Every id that belongs to a source: the source, its chapters, and their claims and quotations. */

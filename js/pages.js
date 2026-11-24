@@ -2,19 +2,27 @@
 // Each function returns a DOM element. They read from `ctx` ({ doc, t, data, href, appVersion, now }).
 
 import { chicagoPlatform, chicagoWork, needsLocatorWarning } from './cite.js';
-import { renderText } from './format-text.js';
+import { caveatText, renderFieldText } from './format-text.js';
 import { renderHubTable } from './lists.js';
 import { askAiBlock } from './ask-ai-ui.js';
-import { linksFor, openCopy, openFormat } from './my-library.js';
+import {
+  isLocated,
+  linksFor,
+  openCopy,
+  openFormat,
+  pageFromClaim,
+  pageFromLocator,
+  positionKind,
+} from './my-library.js';
 import { workspaceBlock } from './workspace-ui.js';
 import { buildReportMessage, reportMailto } from './report.js';
-import { aiBadge, badge, el, linkTo, relatedSection, richText } from './ui.js';
+import { aiBadge, badge, coverOrPlaceholder, el, linkTo, relatedSection, richText, titleRow } from './ui.js';
 
 const GLANCE_FIELDS = ['Author’s purpose and overall argument', 'Purpose and overall argument', 'Summary'];
 
-const textBlock = (doc, text, attrs = {}) => {
+const textBlock = (doc, text, attrs = {}, name = '') => {
   const box = el(doc, 'div', attrs);
-  box.innerHTML = renderText(text);
+  box.innerHTML = renderFieldText(name, text);
   return box;
 };
 
@@ -151,20 +159,70 @@ const recordBadges = (ctx, record) => {
   );
 };
 
+// Bookkeeping fields of a record, shown at the foot of its page.
+const DETAIL_FIELDS = new Set(['Source key', 'Type', 'Tags']);
+
+/** A chapter title as plain text (no emphasis marks), for matching an EPUB's table of contents; null when there is none. */
+const plainTitle = (title) => {
+  const text = String(title ?? '')
+    .replace(/[*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text === '' || text === 'null' ? null : text;
+};
+
+/** A small "open my copy at p. N" button for a claim or quotation; null when the reader's copy cannot be opened at a page. */
+function openAtPage(ctx, sourceId, page, quoteId = null) {
+  const { doc, t } = ctx;
+  const found = quoteId !== null && isLocated(ctx.myLibrary, quoteId);
+  if (!found && (page === null || positionKind(ctx.myLibrary, sourceId) !== 'page')) return null;
+  const status = el(doc, 'span', { class: 'hint', role: 'status' });
+  const button = el(doc, 'button', {
+    type: 'button',
+    class: 'open-at',
+    ...(found ? { 'data-quote': quoteId } : { 'data-page': String(page) }),
+    text: found ? t('lib_open_quote') : t('lib_open_page', { page }),
+  });
+  button.addEventListener('click', async () => {
+    status.textContent = '';
+    const result = await openCopy(ctx.myLibrary, sourceId, {
+      ...(found ? { quote: quoteId } : { page }),
+      baseUrl: ctx.baseUrl,
+    });
+    status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
+  });
+  return el(doc, 'span', { class: 'open-at-wrap' }, ' ', button, ' ', status);
+}
+
+/** A label for a chapter record that has no title: "Chapter 4" from its number or from -ch04 in its key, else the key. */
+function chapterFallback(ctx, chapter) {
+  const number = chapter.chapterNumber ?? /-ch0*(\d+)$/.exec(chapter.key)?.[1];
+  return number ? ctx.t('chapter_number', { number }) : chapter.key;
+}
+
+/** The numbered list of a record's claims, each with its own id (so a note or a link can point at one claim). */
+function claimsList(ctx, record) {
+  const { doc, t, data } = ctx;
+  const list = el(doc, 'ol', { id: 'record-claims' });
+  for (const c of data.claimsOf(record.key)) {
+    const item = el(doc, 'li', { id: c.id });
+    item.append(richText(doc, c.text), ' ', badge(doc, t, 'pages', record.verification?.pages ?? 'unstated'));
+    const claimOpen = openAtPage(ctx, record.source ?? record.key, pageFromClaim(c.text));
+    if (claimOpen) item.append(claimOpen);
+    list.append(item);
+  }
+  return list;
+}
+
 /** Claims and quotations of a record, each with its id, its locator and the locator's verification status. */
-function unitsOf(ctx, record) {
+function unitsOf(ctx, record, { claimsInFields = false } = {}) {
   const { doc, t, data } = ctx;
   const out = [];
   const claims = data.claimsOf(record.key);
-  if (claims.length > 0) {
+  // On a record page the claims already stand where the record's own "Main claims" field is, so they are not listed twice.
+  if (claims.length > 0 && !claimsInFields) {
     out.push(el(doc, 'h2', { text: t('record_claims') }));
-    const list = el(doc, 'ol', { id: 'record-claims' });
-    for (const c of claims) {
-      const item = el(doc, 'li', { id: c.id });
-      item.append(richText(doc, c.text), ' ', badge(doc, t, 'pages', record.verification?.pages ?? 'unstated'));
-      list.append(item);
-    }
-    out.push(list);
+    out.push(claimsList(ctx, record));
   }
   const quotes = data.quotationsOf(record.key);
   if (quotes.length > 0) {
@@ -175,8 +233,11 @@ function unitsOf(ctx, record) {
       item.append(el(doc, 'q', { text: q.text }));
       if (q.locator) item.append(` (${q.locator})`);
       item.append(' ', badge(doc, t, 'verification', record.verification?.quotations ?? 'unstated'));
-      if (q.caveat) item.append(` — ${q.caveat}`);
+      const caveat = caveatText(q);
+      if (caveat) item.append(' — ', richText(doc, caveat));
       if (q.limitedBy) item.append(` ${t('quotation_shortened')}`);
+      const quoteOpen = openAtPage(ctx, record.source ?? record.key, pageFromLocator(q.locator), q.id);
+      if (quoteOpen) item.append(quoteOpen);
       list.append(item);
     }
     out.push(list);
@@ -206,7 +267,7 @@ function editionHistory(ctx, citation) {
  * "My copies": links that open the reader's own copy in Zotero or Calibre, shown only when the private library map is available (on the
  * reader's own machine). The links open programs on this computer; the browser may ask permission the first time.
  */
-export function myCopiesBlock(ctx, sourceId) {
+export function myCopiesBlock(ctx, sourceId, { section = null } = {}) {
   const { doc, t } = ctx;
   const links = linksFor(ctx.myLibrary, sourceId);
   const format = openFormat(ctx.myLibrary, sourceId);
@@ -228,7 +289,17 @@ export function myCopiesBlock(ctx, sourceId) {
       const result = await openCopy(ctx.myLibrary, sourceId, { baseUrl: ctx.baseUrl });
       status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
     });
-    box.append(el(doc, 'p', {}, button));
+    const row = el(doc, 'p', {}, button);
+    if (section !== null && positionKind(ctx.myLibrary, sourceId) === 'section') {
+      const chapter = el(doc, 'button', { type: 'button', id: 'open-my-chapter', text: t('lib_open_chapter') });
+      chapter.addEventListener('click', async () => {
+        status.textContent = '';
+        const result = await openCopy(ctx.myLibrary, sourceId, { section, baseUrl: ctx.baseUrl });
+        status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
+      });
+      row.append(' ', chapter);
+    }
+    box.append(row);
   }
   for (const l of links) {
     box.append(
@@ -254,23 +325,29 @@ export function renderPublication(ctx, id) {
   const own = data.records.get(id) ?? null;
   const chapters = data.chaptersOf(id);
 
-  main.append(el(doc, 'h1', { id: 'page-heading' }, richText(doc, citation.title ?? id)));
+  const cover = coverOrPlaceholder(ctx, id, 'cover');
+  if (cover) main.append(cover);
+  const pubHeading = el(doc, 'h1', { id: 'page-heading' }, richText(doc, citation.title ?? source.displayTitle ?? id));
   main.append(
-    el(
+    titleRow(
       doc,
-      'p',
-      { class: 'badges' },
-      badge(doc, t, 'state', source.state),
-      ' ',
-      badge(doc, t, 'status', citation.status === 'confirmed' ? 'confirmed' : 'suggested'),
-      ' ',
-      own
-        ? [
-            badge(doc, t, 'verification', own.verification?.quotations ?? 'unstated'),
-            ' ',
-            badge(doc, t, 'pages', own.verification?.pages ?? 'unstated'),
-          ]
-        : null,
+      pubHeading,
+      el(
+        doc,
+        'p',
+        { class: 'badges' },
+        badge(doc, t, 'state', source.state),
+        ' ',
+        badge(doc, t, 'status', citation.status === 'confirmed' ? 'confirmed' : 'suggested'),
+        ' ',
+        own
+          ? [
+              badge(doc, t, 'verification', own.verification?.quotations ?? 'unstated'),
+              ' ',
+              badge(doc, t, 'pages', own.verification?.pages ?? 'unstated'),
+            ]
+          : null,
+      ),
     ),
   );
 
@@ -324,7 +401,7 @@ export function renderPublication(ctx, id) {
           doc,
           'li',
           {},
-          linkTo(doc, ctx, chapter.key, chapter.title ?? chapter.key),
+          linkTo(doc, ctx, chapter.key, chapter.title ?? chapterFallback(ctx, chapter)),
           ' ',
           badge(doc, t, 'state', chapter.state),
           ' ',
@@ -401,7 +478,11 @@ export function renderPublication(ctx, id) {
     actions(ctx, {
       key: id,
       title: citation.title,
-      cite: { work: chicagoWork(citation), platformTitle: citation.title ?? id, verification: own?.verification },
+      cite: {
+        work: chicagoWork(citation),
+        platformTitle: citation.title ?? source.displayTitle ?? id,
+        verification: own?.verification,
+      },
     }),
   );
   return main;
@@ -424,25 +505,62 @@ export function renderChapter(ctx, key) {
         'a',
         { href: ctx.href(`/publication/${encodeURIComponent(record.source)}`), 'data-link': true },
         '← ',
-        richText(doc, source?.citation?.title ?? record.source),
+        richText(doc, source?.citation?.title ?? source?.displayTitle ?? record.source),
       ),
     ),
   );
-  main.append(el(doc, 'h1', { id: 'page-heading' }, richText(doc, record.title ?? source?.citation?.title ?? key)));
+  const cover = record.source ? coverOrPlaceholder(ctx, record.source, 'cover cover-small') : null;
+  if (cover) main.append(cover);
+  const recordHeading = el(
+    doc,
+    'h1',
+    { id: 'page-heading' },
+    richText(doc, record.title ?? source?.citation?.title ?? source?.displayTitle ?? key),
+  );
+  main.append(titleRow(doc, recordHeading, recordBadges(ctx, record)));
   if (record.chapterNumber !== null && record.chapterNumber !== undefined)
     main.append(el(doc, 'p', { class: 'meta', text: t('chapter_number', { number: record.chapterNumber }) }));
-  main.append(recordBadges(ctx, record));
-  const fields = el(doc, 'dl', { id: 'record-fields' });
-  for (const f of record.fields) {
-    fields.append(el(doc, 'dt', { text: f.name }));
-    fields.append(el(doc, 'dd', {}, textBlock(doc, f.value)));
-  }
-  main.append(fields, ...unitsOf(ctx, record));
-  const copies = myCopiesBlock(ctx, record.source);
+  // The reader's questions first: the summary, the main claims and the rest of the content. The record's bookkeeping (its key, type and
+  // tags) and the key to the symbols come last.
+  const content = record.fields.filter((f) => !DETAIL_FIELDS.has(f.name));
+  const details = record.fields.filter((f) => DETAIL_FIELDS.has(f.name));
+  const hasClaims = data.claimsOf(record.key).length > 0;
+  const claimsField = (f) => hasClaims && /^Main claims\b/.test(f.name);
+  const fieldList = (list, id) => {
+    const dl = el(doc, 'dl', { id });
+    for (const f of list) {
+      dl.append(
+        el(doc, 'dt', { text: f.name }),
+        el(doc, 'dd', {}, claimsField(f) ? claimsList(ctx, record) : textBlock(doc, f.value, {}, f.name)),
+      );
+    }
+    return dl;
+  };
+  const claimsInFields = content.some(claimsField);
+  main.append(fieldList(content, 'record-fields'), ...unitsOf(ctx, record, { claimsInFields }));
+  const copies = myCopiesBlock(ctx, record.source, { section: plainTitle(record.title) });
   if (copies) main.append(copies);
   const groups = data.related([key, ...data.claimsOf(key).map((c) => c.id)]);
   const rel = relatedSection(doc, ctx, groups);
   if (rel) main.append(rel);
+  const aside = el(doc, 'section', {
+    id: 'record-details',
+    class: 'record-details',
+    'aria-labelledby': 'record-details-heading',
+  });
+  aside.append(
+    el(doc, 'h2', { id: 'record-details-heading', text: t('record_details') }),
+    fieldList(details, 'record-detail-fields'),
+  );
+  aside.append(
+    el(
+      doc,
+      'p',
+      { class: 'hint' },
+      el(doc, 'a', { href: `${ctx.href('/about')}#status-meanings`, 'data-link': true, text: t('record_symbol_key') }),
+    ),
+  );
+  main.append(aside);
   main.append(metaLine(ctx, [key, ...data.claimsOf(key).map((c) => c.id), ...data.quotationsOf(key).map((q) => q.id)]));
   const authors = (record.authors?.ids ?? []).map((id) => data.titleOf(id));
   main.append(
@@ -479,28 +597,33 @@ export function claimItem(ctx, id) {
   return li;
 }
 
+/** The provenance sentence ("Drafted by X; reviewed and confirmed by Y on Z."), or null when the item records none. */
+const provenanceText = (ctx, item) => {
+  const { t } = ctx;
+  const p = item.provenance ?? {};
+  if (p.drafted_by === undefined && p.reviewed_by === undefined) return null;
+  return p.reviewed_by
+    ? t('provenance_reviewed', { by: p.reviewed_by, on: p.reviewed_on, drafted: p.drafted_by })
+    : t('provenance_unreviewed', { drafted: p.drafted_by ?? '—' });
+};
+
 export const authoredBadges = (ctx, item) => {
   const { doc, t } = ctx;
+  const note = provenanceText(ctx, item);
   return el(
     doc,
     'p',
     { class: 'badges' },
-    badge(doc, t, 'status', item.status),
-    item.provenance?.drafted_by?.includes('AI-assisted') ? [' ', aiBadge(doc, t)] : null,
+    badge(doc, t, 'status', item.status, note),
+    item.provenance?.drafted_by?.includes('AI-assisted') ? [' ', aiBadge(doc, t, note)] : null,
     item.basis ? [' ', badge(doc, t, 'basis', item.basis)] : null,
   );
 };
 
+/** Who drafted and who reviewed an item: set at the foot of its page (and in the tooltip of its markers), not under the title. */
 export const provenanceNote = (ctx, item) => {
-  const { doc, t } = ctx;
-  const p = item.provenance ?? {};
-  return el(doc, 'p', {
-    class: 'meta',
-    id: 'provenance',
-    text: p.reviewed_by
-      ? t('provenance_reviewed', { by: p.reviewed_by, on: p.reviewed_on, drafted: p.drafted_by })
-      : t('provenance_unreviewed', { drafted: p.drafted_by ?? '—' }),
-  });
+  const text = provenanceText(ctx, item) ?? ctx.t('provenance_unreviewed', { drafted: '—' });
+  return el(ctx.doc, 'p', { class: 'meta provenance', id: 'provenance', text });
 };
 
 export function renderArgument(ctx, id) {
@@ -508,7 +631,7 @@ export function renderArgument(ctx, id) {
   const a = data.arguments.get(id);
   if (a === undefined) return notFound(ctx);
   const main = el(doc, 'article');
-  main.append(el(doc, 'h1', { id: 'page-heading', text: a.title }), authoredBadges(ctx, a), provenanceNote(ctx, a));
+  main.append(titleRow(doc, el(doc, 'h1', { id: 'page-heading', text: a.title }), authoredBadges(ctx, a)));
   if (a.status === 'suggested')
     main.append(el(doc, 'p', { class: 'warning', role: 'note', id: 'suggested-note', text: t('suggested_note') }));
   const section = (heading, ids, ordered = true) => {
@@ -571,6 +694,7 @@ export function renderArgument(ctx, id) {
       },
     }),
   );
+  main.append(provenanceNote(ctx, a));
   return main;
 }
 
@@ -579,12 +703,14 @@ export function renderConcept(ctx, id) {
   const c = data.concepts.get(id);
   if (c === undefined) return notFound(ctx);
   const main = el(doc, 'article');
-  main.append(el(doc, 'h1', { id: 'page-heading', text: c.name }), authoredBadges(ctx, c), provenanceNote(ctx, c));
+  main.append(titleRow(doc, el(doc, 'h1', { id: 'page-heading', text: c.name }), authoredBadges(ctx, c)));
   main.append(el(doc, 'h2', { text: t('concept_definition') }), el(doc, 'p', { id: 'definition', text: c.definition }));
-  if (c.in_odonovan)
+  // How the collection's subject treats the concept: `in_subject` (any collection) or `in_odonovan` (the first collection's name for it).
+  const inSubject = c.in_subject ?? c.in_odonovan;
+  if (inSubject)
     main.append(
       el(doc, 'h2', { text: t('concept_in_odonovan') }),
-      el(doc, 'p', { id: 'in-odonovan', text: c.in_odonovan.replace(/\s+/g, ' ').trim() }),
+      el(doc, 'p', { id: 'in-odonovan', text: inSubject.replace(/\s+/g, ' ').trim() }),
     );
   if (c.evidence?.length)
     main.append(
@@ -654,6 +780,7 @@ export function renderConcept(ctx, id) {
       },
     }),
   );
+  main.append(provenanceNote(ctx, c));
   return main;
 }
 
@@ -663,7 +790,15 @@ function personWorks(ctx, id) {
   if (works.size === 0) return null;
   const list = el(doc, 'ul', { id: 'works' });
   for (const [sourceId, recs] of works)
-    list.append(el(doc, 'li', {}, linkTo(doc, ctx, sourceId), ` (${t('works_records', { count: recs.length })})`));
+    list.append(
+      el(
+        doc,
+        'li',
+        {},
+        linkTo(doc, ctx, sourceId),
+        ` (${t(recs.length === 1 ? 'works_record_one' : 'works_records', { count: recs.length })})`,
+      ),
+    );
   return el(doc, 'section', {}, el(doc, 'h2', { text: t('person_works') }), list);
 }
 
@@ -676,7 +811,7 @@ export function renderThinker(ctx, id) {
   main.append(el(doc, 'h1', { id: 'page-heading', text: p.display_name ?? p.name }));
   main.append(el(doc, 'p', { class: 'meta', text: [t(`kind_${p.kind}`), p.dates].filter(Boolean).join(' · ') }));
   const mentions = data.related([id]);
-  const isOdonovan = p.kind === 'o_donovan';
+  const isOdonovan = p.kind === 'o_donovan' || p.kind === 'subject';
   if (!isOdonovan) {
     main.append(el(doc, 'p', { class: 'hint', text: t('thinker_scoped_note') }));
     main.append(el(doc, 'h2', { text: t('thinker_in_odonovan') }));
@@ -756,12 +891,16 @@ export function renderScholar(ctx, id) {
 }
 
 export function renderAbout(ctx) {
-  const { doc, t } = ctx;
+  const { doc, t, data } = ctx;
   const main = el(doc, 'article', { id: 'about' });
   main.append(el(doc, 'h1', { id: 'page-heading', text: t('about_title') }));
-  main.append(el(doc, 'p', { text: t('about_intro') }));
-  main.append(el(doc, 'h2', { text: t('about_framework_title') }), el(doc, 'p', { text: t('about_framework') }));
-  main.append(el(doc, 'h2', { text: t('about_layers_title') }), el(doc, 'p', { text: t('about_layers') }));
+  main.append(el(doc, 'p', { text: t(data.site.subject ? 'about_intro' : 'about_intro_generic') }));
+  // The editors' statements (outlook, layers, rights, takedown) belong to a published collection. A reader's own knowledge base has none.
+  const published = Boolean(data.site.subject);
+  if (published) {
+    main.append(el(doc, 'h2', { text: t('about_framework_title') }), el(doc, 'p', { text: t('about_framework') }));
+    main.append(el(doc, 'h2', { text: t('about_layers_title') }), el(doc, 'p', { text: t('about_layers') }));
+  }
   main.append(el(doc, 'h2', { text: t('about_statuses_title') }));
   const dl = el(doc, 'dl', { id: 'status-meanings' });
   for (const [kind, values] of [
@@ -769,7 +908,7 @@ export function renderAbout(ctx) {
     ['verification', ['print_checked', 'text_checked', 'unchecked', 'unstated']],
     ['pages', ['checked', 'checked_in_text', 'estimated', 'unchecked', 'unstated']],
     ['state', ['listed', 'summarised']],
-    ['role', ['odonovan_own', 'scholarship', 'sourcebook']],
+    ...(published ? [['role', ['odonovan_own', 'scholarship', 'sourcebook']]] : []),
     ['basis', ['explicit', 'reconstructed']],
   ]) {
     for (const v of values)
@@ -777,19 +916,23 @@ export function renderAbout(ctx) {
   }
   dl.append(el(doc, 'dt', {}, aiBadge(doc, t)), el(doc, 'dd', { text: t('meaning_ai') }));
   main.append(dl);
-  main.append(el(doc, 'h2', { text: t('about_rights_title') }), el(doc, 'p', { text: t('about_rights') }));
-  main.append(el(doc, 'h2', { text: t('about_takedown_title') }));
-  const address = ctx.data.site.contactAddress;
-  main.append(
-    el(
-      doc,
-      'p',
-      { id: 'takedown' },
-      address
-        ? [t('about_takedown_with'), ' ', el(doc, 'a', { href: `mailto:${address}`, text: address })]
-        : t('about_takedown_without'),
-    ),
-  );
+  if (published) {
+    main.append(el(doc, 'h2', { text: t('about_rights_title') }), el(doc, 'p', { text: t('about_rights') }));
+    main.append(el(doc, 'h2', { text: t('about_takedown_title') }));
+    const address = ctx.data.site.contactAddress;
+    main.append(
+      el(
+        doc,
+        'p',
+        { id: 'takedown' },
+        address
+          ? [t('about_takedown_with'), ' ', el(doc, 'a', { href: `mailto:${address}`, text: address })]
+          : t('about_takedown_without'),
+      ),
+    );
+  } else {
+    main.append(el(doc, 'p', { id: 'about-personal', text: t('about_personal') }));
+  }
   main.append(
     el(
       doc,

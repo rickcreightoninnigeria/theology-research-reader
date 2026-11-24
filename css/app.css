@@ -522,3 +522,65 @@ input[type='number'] {
     break-inside: avoid;
   }
 }
+
+/* The reader's own book covers (a Calibre cover.jpg), present only on the reader's own computer */
+.cover {
+  float: right;
+  width: 7rem;
+  max-width: 30%;
+  height: auto;
+  margin: 0 0 0.75rem 1rem;
+  border-radius: 3px;
+}
+.cover-small {
+  width: 4.5rem;
+}
+.cover-thumb {
+  width: 1.5rem;
+  height: 2.2rem;
+  object-fit: cover;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+.record-details {
+  margin-top: 2rem;
+}
+
+/* Generated covers (app/js/cover.js) are drawn for every source but shown only by the desktop stylesheet */
+.cover-gen {
+  display: none;
+}
+
+/* Fields that are lists: numbered claims, and the people and leads a record names */
+dd ol,
+dd ul {
+  margin: 0.25rem 0;
+  padding-left: 1.6rem;
+}
+dd ol > li,
+dd ul > li {
+  margin: 0.3rem 0;
+  padding-left: 0.2rem;
+}
+dd ol > li::marker {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "A new version is ready" (shown only on the reader's own computer) */
+#update-ready {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.4rem 1rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+#update-ready[hidden] {
+  display: none;
+}
+#update-ready button {
+  min-height: 2rem;
+  padding: 0.1rem 0.8rem;
+}

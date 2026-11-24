@@ -2,6 +2,8 @@
 // Everything is built with DOM methods and textContent; record text goes through renderText (sanitised).
 
 import { inlineMarkup } from './format-text.js';
+import { coverModel, drawCover } from './cover.js';
+import { coverUrl } from './my-library.js';
 
 export const el = (doc, tag, attrs = {}, ...children) => {
   const node = doc.createElement(tag);
@@ -21,6 +23,9 @@ export function richText(doc, text, tag = 'span') {
   return node;
 }
 
+// The kinds of marker that have a fuller explanation (the "meaning_*" strings), shown as a tooltip on the desktop.
+const TIPPED = new Set(['status', 'verification', 'pages', 'state', 'role', 'basis']);
+
 const GLYPH = {
   confirmed: '●',
   editorially_confirmed: '●',
@@ -33,8 +38,10 @@ const GLYPH = {
  * A badge always has a text label, so status is never shown by colour alone; `suggested` also has a dashed outline and an open
  * circle. `kind` and `value` pick the label from the locale (badge_<kind>_<value>).
  */
-export function badge(doc, t, kind, value) {
+export function badge(doc, t, kind, value, extraTip = null) {
   const label = t(`badge_${kind}_${value}`);
+  const base = TIPPED.has(kind) ? `${label}. ${t(`meaning_${kind}_${value}`)}` : kind === 'person' ? label : null;
+  const tip = base !== null && extraTip ? `${base} ${extraTip}` : base;
   const glyph =
     kind === 'status' && GLYPH[value]
       ? el(doc, 'span', { 'aria-hidden': 'true', class: 'glyph', text: `${GLYPH[value]} ` })
@@ -42,14 +49,23 @@ export function badge(doc, t, kind, value) {
   return el(
     doc,
     'span',
-    { class: `badge badge-${kind} badge-${kind}-${value}`, 'data-kind': kind, 'data-value': value },
+    { class: `badge badge-${kind} badge-${kind}-${value}`, 'data-kind': kind, 'data-value': value, 'data-tip': tip },
     glyph,
     label,
   );
 }
 
-export const aiBadge = (doc, t) =>
-  el(doc, 'span', { class: 'badge badge-ai', 'data-kind': 'ai' }, t('badge_ai_assisted'));
+export const aiBadge = (doc, t, extraTip = null) =>
+  el(
+    doc,
+    'span',
+    {
+      class: 'badge badge-ai',
+      'data-kind': 'ai',
+      'data-tip': `${t('badge_ai_assisted')}. ${t('meaning_ai')}${extraTip ? ` ${extraTip}` : ''}`,
+    },
+    t('badge_ai_assisted'),
+  );
 
 /** A link to an id's page, or plain text when the id has no page. */
 export function linkTo(doc, ctx, id, label = ctx.data.titleOf(id)) {
@@ -68,7 +84,11 @@ export function relatedSection(doc, ctx, groups, { headingLevel = 2, title } = {
   const section = el(doc, 'section', { class: 'related', 'aria-labelledby': 'related-heading' });
   section.append(el(doc, `h${headingLevel}`, { id: 'related-heading', text: title ?? ctx.t('related_title') }));
   for (const group of shown) {
-    section.append(el(doc, `h${headingLevel + 1}`, { text: ctx.t(`rel_${group.reading}`) }));
+    // A group heading that only repeats the section's own title ("Engages" under "Engages") is left out.
+    const groupTitle = ctx.t(`rel_${group.reading}`);
+    if (groupTitle !== title) {
+      section.append(el(doc, `h${headingLevel + 1}`, { text: groupTitle }));
+    }
     const list = el(doc, 'ul');
     for (const item of group.items) {
       const record = ctx.data.records.get(item.otherId);
@@ -87,4 +107,28 @@ export function relatedSection(doc, ctx, groups, { headingLevel = 2, title } = {
     section.append(list);
   }
   return section;
+}
+
+/** The reader's own book cover (a Calibre cover.jpg) as a small decorative image, or null when there is none. Local server only. */
+export function coverImage(ctx, sourceId, className = 'cover') {
+  const url = coverUrl(ctx.myLibrary, sourceId, ctx.baseUrl);
+  if (url === null) return null;
+  const img = el(ctx.doc, 'img', { src: url, alt: '', class: className, loading: 'lazy', decoding: 'async' });
+  img.addEventListener('error', () => img.remove());
+  return img;
+}
+
+/** A page heading with its markers beside it (above it on a phone; the desktop stylesheet puts them side by side). */
+export const titleRow = (doc, heading, markers) => el(doc, 'div', { class: 'title-row' }, heading, markers);
+
+/**
+ * A source's cover: the reader's own (a Calibre cover.jpg, or a picture of its journal) when there is one; otherwise a generated cover drawn
+ * from the record. The generated one is shown by the desktop stylesheet only. Null for something that is not a source.
+ */
+export function coverOrPlaceholder(ctx, sourceId, className = 'cover') {
+  const real = coverImage(ctx, sourceId, className);
+  if (real !== null) return real;
+  const source = ctx.data?.sources?.get(sourceId);
+  if (source === undefined) return null;
+  return drawCover(ctx.doc, coverModel(source), ctx.t, `cover-gen ${className}`);
 }

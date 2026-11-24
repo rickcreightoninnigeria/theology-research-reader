@@ -4,13 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <base href="/theology-research-reader/" />
-    <meta name="app-version" content="0.0.1" />
+    <meta name="app-version" content="0.1.0" />
     <meta name="theme-color" content="#2b2f3a" />
     <title>Theology Research Reader</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="images/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="images/icon-192.png" />
     <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/desktop.css" media="(min-width: 60rem) and (hover: hover)" />
   </head>
   <body>
     <a class="skip" href="#view" data-i18n="skip_to_content"></a>
@@ -29,6 +30,10 @@
     <div id="status" role="status" aria-live="polite"></div>
     <main id="view" tabindex="-1"></main>
     <div id="ios-hint" hidden data-i18n="hint_add_to_home"></div>
+    <div id="update-ready" role="status" hidden>
+      <span data-i18n="update_ready"></span>
+      <button type="button" data-i18n="update_reload"></button>
+    </div>
     <script type="module" src="js/main.js"></script>
   </body>
 </html>

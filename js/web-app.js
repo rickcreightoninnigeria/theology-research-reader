@@ -1,11 +1,59 @@
 // Web build only: service worker registration, the request for durable storage, and the Add to Home Screen hint for iPhone.
 // Everything is wrapped so a missing or refused feature never stops the app.
 
-/** Registers the service worker. Returns a short status string for the diagnostics page. */
-export async function registerServiceWorker({ navigator: nav = globalThis.navigator, base = './' } = {}) {
+/** True when the app is open on the reader's own computer (the only place a waiting build may be taken over at once). */
+export const isOwnComputer = (hostname = globalThis.location?.hostname) =>
+  ['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname);
+
+/**
+ * On the reader's own computer, tells `onReady` when a newer build of the app has been downloaded and is waiting, and checks for one whenever
+ * the window is brought back to the front. Returns { reload } which makes the waiting build take over and reloads the page. Elsewhere it
+ * does nothing, and a new build waits until every window has closed.
+ */
+export function watchForNewBuild(
+  registration,
+  {
+    navigator: nav = globalThis.navigator,
+    hostname,
+    onReady,
+    reloadPage = () => globalThis.location.reload(),
+    doc = globalThis.document,
+  } = {},
+) {
+  if (!registration || !isOwnComputer(hostname) || !nav?.serviceWorker) return { reload() {} };
+  let waiting = registration.waiting && nav.serviceWorker.controller ? registration.waiting : null;
+  if (waiting) onReady?.();
+  registration.addEventListener?.('updatefound', () => {
+    const worker = registration.installing;
+    worker?.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && nav.serviceWorker.controller) {
+        waiting = worker;
+        onReady?.();
+      }
+    });
+  });
+  doc?.addEventListener?.('visibilitychange', () => {
+    if (doc.visibilityState === 'visible') registration.update?.().catch?.(() => {});
+  });
+  return {
+    reload() {
+      nav.serviceWorker.addEventListener('controllerchange', () => reloadPage(), { once: true });
+      if (waiting) waiting.postMessage({ type: 'skip-waiting' });
+      else reloadPage();
+    },
+  };
+}
+
+/** Registers the service worker. Returns a short status string for the diagnostics page; `onRegistration` gets the registration. */
+export async function registerServiceWorker({
+  navigator: nav = globalThis.navigator,
+  base = './',
+  onRegistration = null,
+} = {}) {
   if (!nav?.serviceWorker) return 'not supported';
   try {
     const registration = await nav.serviceWorker.register(`${base}sw.js`, { scope: base });
+    onRegistration?.(registration);
     return registration.active
       ? 'active'
       : registration.installing
