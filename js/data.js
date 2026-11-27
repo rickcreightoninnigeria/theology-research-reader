@@ -217,6 +217,8 @@ export function createData(files) {
     relationships,
     relationshipTypes: types,
     site: files.site ?? {},
+    thinkersPage: files['thinkers-page'] ?? null,
+    shortTitles: files['short-titles'] ?? [],
     corrections: files.corrections ?? [],
     resolve,
     titleOf,

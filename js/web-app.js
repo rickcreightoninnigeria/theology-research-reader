@@ -87,3 +87,23 @@ export function needsHomeScreenHint({
   const standalone = nav?.standalone === true || matchMedia?.('(display-mode: standalone)')?.matches === true;
   return ios && !standalone;
 }
+
+/**
+ * Back and Forward buttons for a window that has none of its own (the desktop app, an Electron window). A browser keeps its own, so
+ * the buttons stay hidden there.
+ */
+export function historyButtons({ doc = globalThis.document, win = globalThis.window } = {}) {
+  const box = doc.getElementById('history-buttons');
+  if (box === null || !/\bElectron\//.test(win.navigator.userAgent)) return;
+  const back = doc.getElementById('nav-back');
+  const forward = doc.getElementById('nav-forward');
+  const refresh = () => {
+    back.disabled = win.navigation?.canGoBack === false;
+    forward.disabled = win.navigation?.canGoForward === false;
+  };
+  back.addEventListener('click', () => win.history.back());
+  forward.addEventListener('click', () => win.history.forward());
+  win.navigation?.addEventListener('currententrychange', refresh);
+  box.hidden = false;
+  refresh();
+}

@@ -436,3 +436,83 @@ svg.cover-thumb.cover-gen {
   padding: 0;
   min-height: 0;
 }
+
+/* On a quotation the marker stays at the right of the first line, and the notes take the full width below */
+#record-quotations > li > .quote-line {
+  flex: 1 1 0;
+  min-width: 0;
+}
+#record-quotations > li > .quote-meta {
+  flex-basis: 100%;
+}
+
+/* "Open" and "Find": one column of buttons of one width, level with the first line of each claim or quotation, just left of the place
+   where the quotation markers stand. The list takes the full width of the page, so the column is at the right margin. */
+main dd:has(#record-claims .open-at) {
+  max-width: none;
+}
+#record-claims > li,
+#record-quotations > li {
+  position: relative;
+}
+#record-claims:has(.open-at) > li {
+  padding-right: 9rem;
+}
+#record-quotations:has(.open-at) > li > .quote-line {
+  padding-right: 6.5rem;
+}
+#record-quotations > li > .badge {
+  box-sizing: border-box;
+  width: 2.5rem;
+  padding: 0;
+  text-align: right;
+}
+.open-at-wrap {
+  position: absolute;
+  top: 0.15rem;
+  right: 2.5rem;
+}
+.open-at {
+  position: relative;
+  display: block;
+  width: 5.5rem;
+  white-space: nowrap;
+}
+.open-long {
+  display: none;
+}
+.open-short {
+  display: inline;
+}
+.open-at[data-tip]:hover::after,
+.open-at[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.4rem);
+  z-index: 20;
+  width: max-content;
+  max-width: 20rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.4rem;
+  background: var(--tip-bg);
+  color: var(--tip-fg);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.25);
+  pointer-events: none;
+}
+/* What happened after a click, in a small box under the button, so the text does not move */
+.open-at-wrap > .hint:not(:empty) {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  right: 0;
+  z-index: 15;
+  width: max-content;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--card);
+  font-size: 0.8rem;
+  pointer-events: none;
+}

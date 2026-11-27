@@ -1,7 +1,9 @@
 // The home page, the six entry-point list pages, the pathway pages and the "New here?" page (stage 6). Each returns a DOM element.
 // They read from `ctx` ({ doc, t, data, href, ... }); the lists all lead to the same records the search finds.
 
+import { yearOf } from './cite.js';
 import { importBlock } from './import-ui.js';
+import { hasThinkersPage, renderThinkersPage } from './thinkers-view.js';
 import { aiBadge, badge, coverOrPlaceholder, el, linkTo } from './ui.js';
 
 const ROLE_ORDER = ['odonovan_own', 'scholarship', 'sourcebook'];
@@ -150,7 +152,7 @@ export function renderPublications(ctx) {
   for (const role of data.site.subject ? ROLE_ORDER : ['all']) {
     const group = sorted(
       bySource.filter((x) => role === 'all' || (x.record?.role ?? 'scholarship') === role),
-      (x) => `${x.source.citation?.dates?.original ?? 9999}${x.source.id}`,
+      (x) => `${yearOf(x.source.citation?.dates?.original) ?? 9999}${x.source.id}`,
     );
     if (group.length === 0) continue;
     main.append(
@@ -159,6 +161,7 @@ export function renderPublications(ctx) {
     const list = el(doc, 'ul', { class: 'publist' });
     for (const { source, record } of group) {
       const creators = (source.citation?.creators ?? []).map((c) => c.display_name ?? c.name).join(', ');
+      const published = yearOf(source.citation?.dates?.original) ?? t('pub_no_date');
       list.append(
         el(
           doc,
@@ -173,7 +176,7 @@ export function renderPublications(ctx) {
             ' ',
             el(doc, 'span', {
               class: 'meta',
-              text: `${creators}${source.citation?.dates?.original ? ` (${source.citation.dates.original})` : ''}`,
+              text: `${creators} (${published})`.trim(),
             }),
           ),
           ' ',
@@ -245,11 +248,15 @@ export function renderArgumentsList(ctx) {
   return main;
 }
 
-/** Thinkers: O’Donovan, anchors, other thinkers, then scholars; each links to its own page. */
+/**
+ * Thinkers: by relationship to the subject where the pack carries that page (private packs); otherwise by kind (O’Donovan, anchors,
+ * other thinkers, then scholars). Each person links to their own page.
+ */
 export function renderThinkers(ctx) {
   const { doc, t, data } = ctx;
   const main = el(doc, 'section', { id: 'thinkers' });
   main.append(heading(doc, t('tile_thinkers')));
+  if (hasThinkersPage(data)) return renderThinkersPage(ctx, main);
   const people = [...data.thinkers.values()];
   for (const kind of KIND_ORDER) {
     const list = sorted(

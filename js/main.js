@@ -35,9 +35,10 @@ import { renderReview } from './review-ui.js';
 import { renderCompare, renderPosition, renderTimeline } from './views.js';
 import { renderDiagnostics, renderSettings, renderSources } from './viewer.js';
 import { importBlock } from './import-ui.js';
-import { loadMyLibrary } from './my-library.js';
+import { loadCollectionStatus, loadLenses, loadMyLibrary } from './my-library.js';
 import { backupBlock, renderProject, renderWorkspace } from './workspace-ui.js';
 import {
+  historyButtons,
   isOwnComputer,
   needsHomeScreenHint,
   registerServiceWorker,
@@ -82,7 +83,15 @@ installGlobalHandlers(window, errorLog, (entry) =>
   showErrorBanner(doc, entry, { text: tt('error_banner'), dismissLabel: tt('error_dismiss') }),
 );
 
-const state = { myLibrary: null, serviceWorker: null, persisted: null, pending: null, session: null, ctx: null };
+const state = {
+  lenses: [],
+  myLibrary: null,
+  serviceWorker: null,
+  persisted: null,
+  pending: null,
+  session: null,
+  ctx: null,
+};
 const idb = createIdb();
 
 const REQUIRED_FILES = ['master-index', 'sources', 'records', 'claims', 'quotations'];
@@ -100,6 +109,8 @@ const OPTIONAL_FILES = {
   'relationship-types': {},
   corrections: [],
   site: {},
+  'thinkers-page': null,
+  'short-titles': [],
 };
 
 /** Reads the pack files into one context. An older collection that lacks an optional file gets an empty one. */
@@ -176,8 +187,10 @@ async function diagnosticsReport() {
     persisted: state.persisted,
     serviceWorker: state.serviceWorker,
     idb,
+    collections: await loadCollectionStatus({ baseUrl }),
   });
-  return formatDiagnosticsReport(data, tt);
+  const date = new Intl.DateTimeFormat(i18n.uiLanguage, { dateStyle: 'medium', timeStyle: 'short' });
+  return formatDiagnosticsReport(data, tt, (iso) => date.format(new Date(iso)));
 }
 
 let router;
@@ -195,7 +208,9 @@ async function render(route) {
     idb,
     random: Math.random,
     myLibrary: state.myLibrary,
+    lenses: state.lenses,
     baseUrl,
+    uiLanguage: i18n.uiLanguage,
     collectionMeta: state.ctx?.collection ?? null,
     errorLog,
     confirm: (message) => window.confirm(message),
@@ -253,9 +268,11 @@ async function render(route) {
       : renderChapter(pageCtx, route.params.id);
   } else if (route.name === 'argument') view = renderArgument(pageCtx, route.params.id);
   else if (route.name === 'concept') view = renderConcept(pageCtx, route.params.id);
-  else if (route.name === 'thinker') view = renderThinker(pageCtx, route.params.id);
-  else if (route.name === 'scholar') view = renderScholar(pageCtx, route.params.id);
-  else view = notFound(pageCtx);
+  else if (route.name === 'thinker' || route.name === 'scholar') {
+    // The person's kind in this collection decides the page, so a link from another collection may use either address.
+    const scholar = state.ctx.data.thinkers.get(route.params.id)?.kind === 'scholar';
+    view = (scholar ? renderScholar : renderThinker)(pageCtx, route.params.id);
+  } else view = notFound(pageCtx);
   viewEl.replaceChildren(view);
   if (!NOT_REMEMBERED.has(route.name) && view.querySelector('h1'))
     writeLast({ path: buildPath(route.name, route.params), title: view.querySelector('h1').textContent });
@@ -321,6 +338,7 @@ async function start() {
   setStatus(tt('status_loading'));
 
   router = createRouter({ window, base, render });
+  historyButtons();
 
   let session = await startSession({ idb });
   if (session.version === null) {
@@ -339,6 +357,7 @@ async function start() {
   i18n.setDefaults({ subject: site.subjectShort ?? site.subject ?? '', subject_full: site.subject ?? '' });
   // Only on the reader's own machine: a private map of the reader's Zotero and Calibre copies (never on a public site).
   state.myLibrary = await loadMyLibrary({ baseUrl });
+  state.lenses = await loadLenses({ baseUrl });
   if (session.meta.closedTesting) doc.getElementById('test-banner').hidden = false;
   doc.documentElement.dataset.collection = session.version;
   setStatus(navigator.onLine ? tt('status_ready') : tt('status_offline_ready'), { quiet: true });

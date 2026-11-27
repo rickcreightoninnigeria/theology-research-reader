@@ -26,6 +26,40 @@ export async function loadMyLibrary({
   }
 }
 
+/** The state of the reader's collections, from the local server, or null where there is none to ask. */
+export async function loadCollectionStatus({
+  fetchImpl = globalThis.fetch?.bind(globalThis),
+  baseUrl = './',
+  hostname = globalThis.location?.hostname,
+} = {}) {
+  if (!isLocalHost(hostname)) return null;
+  try {
+    const response = await fetchImpl(`${baseUrl}private/collections.json`, { cache: 'no-store' });
+    if (!response.ok || !(response.headers.get('content-type') ?? '').includes('json')) return null;
+    const status = await response.json();
+    return Array.isArray(status?.collections) ? status : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The ids of the other collections this computer can open (the desktop app only), or none. */
+export async function loadLenses({
+  fetchImpl = globalThis.fetch?.bind(globalThis),
+  baseUrl = './',
+  hostname = globalThis.location?.hostname,
+} = {}) {
+  if (!isLocalHost(hostname)) return [];
+  try {
+    const response = await fetchImpl(`${baseUrl}private/lenses.json`, { cache: 'no-store' });
+    if (!response.ok || !(response.headers.get('content-type') ?? '').includes('json')) return [];
+    const { open } = await response.json();
+    return Array.isArray(open) ? open.filter((id) => typeof id === 'string' && /^[\w-]+$/.test(id)) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** The Zotero link for one source: [{ kind: 'zotero-item', url }], or none. */
 export function linksFor(map, sourceId) {
   const entry = map?.entries?.[sourceId];

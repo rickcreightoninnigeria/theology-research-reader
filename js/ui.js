@@ -4,6 +4,7 @@
 import { inlineMarkup } from './format-text.js';
 import { coverModel, drawCover } from './cover.js';
 import { coverUrl } from './my-library.js';
+import { borneOut, nameIndex, recordTitleIndex, shortIndex, titleFor } from './title-links.js';
 
 export const el = (doc, tag, attrs = {}, ...children) => {
   const node = doc.createElement(tag);
@@ -23,6 +24,79 @@ export function richText(doc, text, tag = 'span') {
   return node;
 }
 
+const textIndexes = new WeakMap();
+
+function indexesFor(data) {
+  if (!textIndexes.has(data)) {
+    const works = [...data.sources.values()].map((x) => ({
+      id: x.id,
+      title: x.citation?.title ?? x.displayTitle,
+      type: data.records.get(x.id)?.type,
+    }));
+    const short = shortIndex(data.shortTitles.filter((x) => data.sources.has(x.source)));
+    const names = nameIndex([...data.thinkers.values()]);
+    textIndexes.set(data, { titles: recordTitleIndex(works), short, names });
+  }
+  return textIndexes.get(data);
+}
+
+/**
+ * Links what a piece of record text already on the page names (D93): works by italic title or confirmed short form, and people by full
+ * name, the first time each is mentioned in the piece. Only the shown page changes: the words stay as they are and the record is
+ * untouched. The work the page belongs to (`own`) is not linked, nor is anything already inside a link.
+ */
+export function linkMentions(ctx, node, own = null) {
+  const { data, doc } = ctx;
+  const { titles, short, names } = indexesFor(data);
+  const anchor = (id) =>
+    el(doc, 'a', {
+      href: ctx.href(data.pathOf(id)),
+      'data-link': true,
+      class: data.thinkers.has(id) ? 'person-link' : 'work-link',
+    });
+  for (const em of node.querySelectorAll('em')) {
+    if (em.closest('a')) continue;
+    let id = short.italic(em.textContent);
+    if (id === null) {
+      id = titleFor(em.textContent, titles, true);
+      const passage = (em.closest('li, p, dd') ?? node).textContent;
+      if (id !== null && !borneOut(em.textContent, passage, data.sources.get(id).citation?.creators)) id = null;
+    }
+    if (id === null || id === own) continue;
+    const link = anchor(id);
+    em.replaceWith(link);
+    link.append(em);
+  }
+  // Abbreviations standing in ordinary text.
+  replaceText(doc, node, 'a, button, .badge', anchor, (text) =>
+    short.split(text).map((p) => (p.id === own ? { ...p, id: null } : p)),
+  );
+  // Names, but not inside italics, where they are part of a title.
+  const seen = new Set();
+  replaceText(doc, node, 'a, button, .badge, em', anchor, (text) => names.split(text, seen));
+  return node;
+}
+
+/** Replaces each text under `node` (outside `skip`) by its segments, those with an id as links. */
+function replaceText(doc, node, skip, anchor, split) {
+  const walker = doc.createTreeWalker(node, 4 /* text nodes */);
+  const texts = [];
+  while (walker.nextNode()) texts.push(walker.currentNode);
+  for (const text of texts) {
+    if (text.parentElement?.closest(skip)) continue;
+    const parts = split(text.data);
+    if (!parts.some((p) => p.id !== null)) continue;
+    text.replaceWith(
+      ...parts.map((p) => {
+        if (p.id === null) return p.text;
+        const link = anchor(p.id);
+        link.textContent = p.text;
+        return link;
+      }),
+    );
+  }
+}
+
 // The kinds of marker that have a fuller explanation (the "meaning_*" strings), shown as a tooltip on the desktop.
 const TIPPED = new Set(['status', 'verification', 'pages', 'state', 'role', 'basis']);
 
@@ -40,7 +114,8 @@ const GLYPH = {
  */
 export function badge(doc, t, kind, value, extraTip = null) {
   const label = t(`badge_${kind}_${value}`);
-  const base = TIPPED.has(kind) ? `${label}. ${t(`meaning_${kind}_${value}`)}` : kind === 'person' ? label : null;
+  // The explanation alone: it says what the label says, so giving both would say it twice.
+  const base = TIPPED.has(kind) ? t(`meaning_${kind}_${value}`) : kind === 'person' ? label : null;
   const tip = base !== null && extraTip ? `${base} ${extraTip}` : base;
   const glyph =
     kind === 'status' && GLYPH[value]
@@ -62,7 +137,7 @@ export const aiBadge = (doc, t, extraTip = null) =>
     {
       class: 'badge badge-ai',
       'data-kind': 'ai',
-      'data-tip': `${t('badge_ai_assisted')}. ${t('meaning_ai')}${extraTip ? ` ${extraTip}` : ''}`,
+      'data-tip': extraTip ? `${t('meaning_ai')} ${extraTip}` : t('meaning_ai'),
     },
     t('badge_ai_assisted'),
   );

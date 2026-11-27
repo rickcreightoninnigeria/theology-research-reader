@@ -117,15 +117,41 @@ export function renderFieldText(name, text, purifier = DOMPurify) {
   return renderText(text, purifier);
 }
 
-/** A quotation's caveat without the locator it repeats ("p. 13 – check against print" after "(p. 13)" becomes "check against print"). */
+// The stock reminder the records attach to quotation after quotation. The page says it once, above the list. Only the bare reminder goes:
+// "check against print for the italics" says something more and stays.
+// It is bare when it ends there, or a new sentence follows.
+const STOCK = /(?:\b(?:Both|All)\s*:\s*)?\*?[Cc]heck against print\*?(?=\s*(?:[.;,)\]]|$)|\s+[A-Z](?:[a-z]|\s))/g;
+
+/** Text without the stock reminder, and without the punctuation that held it. */
+const withoutStock = (value) =>
+  String(value ?? '')
+    .replace(STOCK, '')
+    .replace(/\(\s*[;,–—-]*\s*\)/g, '')
+    .replace(/\(\s*[;,]\s*/g, '(')
+    .replace(/\s*[;,–—-]+\s*(?=[).\]])/g, '')
+    .replace(/;(?:\s*;)+/g, ';')
+    .replace(/(?:\s*\.){2,}/g, '.')
+    .trim()
+    .replace(/[\s;,–—-]+$/, '');
+
+/** A quotation's page reference without the stock reminder some records put inside it ("p. 90; check against print" is "p. 90"). */
+export const locatorText = (q) => withoutStock(q.locator);
+
+/**
+ * What a quotation's caveat adds: without the locator it repeats and without the stock "check against print" ("(p. 13). Both: check
+ * against print." says nothing more; "fifth paragraph – check against print" leaves "fifth paragraph"). '' when nothing is left.
+ */
 export function caveatText(q) {
-  let text = String(q.caveat ?? '').trim();
-  if (text === '') return '';
-  const locator = String(q.locator ?? '')
+  let text = withoutStock(q.caveat);
+  const locator = locatorText(q)
     .replace(/^\(|\)$/g, '')
     .trim();
   for (const form of [locator, `(${locator})`]) {
     if (form !== '' && text.startsWith(form)) text = text.slice(form.length);
   }
-  return text.replace(/^[\s–—-]+/, '').trim();
+  text = text
+    .replace(/^[\s.;,:–—-]+/, '')
+    .replace(/[\s;,:–—-]+$/, '')
+    .trim();
+  return /[\p{L}\p{N}]/u.test(text) ? text : '';
 }

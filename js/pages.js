@@ -1,8 +1,8 @@
 // The reading pages (stage 5): publication landing page, chapter page, argument, concept, thinker, scholar, and About.
 // Each function returns a DOM element. They read from `ctx` ({ doc, t, data, href, appVersion, now }).
 
-import { chicagoPlatform, chicagoWork, needsLocatorWarning } from './cite.js';
-import { caveatText, renderFieldText } from './format-text.js';
+import { chicagoPlatform, chicagoWork, needsLocatorWarning, yearOf } from './cite.js';
+import { caveatText, locatorText, renderFieldText } from './format-text.js';
 import { renderHubTable } from './lists.js';
 import { askAiBlock } from './ask-ai-ui.js';
 import {
@@ -14,9 +14,20 @@ import {
   pageFromLocator,
   positionKind,
 } from './my-library.js';
+import { elsewhereSection } from './thinkers-view.js';
 import { workspaceBlock } from './workspace-ui.js';
 import { buildReportMessage, reportMailto } from './report.js';
-import { aiBadge, badge, coverOrPlaceholder, el, linkTo, relatedSection, richText, titleRow } from './ui.js';
+import {
+  aiBadge,
+  badge,
+  coverOrPlaceholder,
+  el,
+  linkMentions,
+  linkTo,
+  relatedSection,
+  richText,
+  titleRow,
+} from './ui.js';
 
 const GLANCE_FIELDS = ['Author’s purpose and overall argument', 'Purpose and overall argument', 'Summary'];
 
@@ -41,12 +52,9 @@ export function metaLine(ctx, ids) {
   return el(doc, 'div', {}, parts, box);
 }
 
-/** The Cite and Report buttons for a record or source. `cite` is { work, platformTitle, verification }. */
-export function actions(ctx, { key, title, cite }) {
+/** The Cite button of a record or source, with both citations. `cite` is { work, platformTitle, verification }. */
+function citeBlock(ctx, { key, cite }) {
   const { doc, t, data } = ctx;
-  const bar = el(doc, 'div', { class: 'actions' });
-  if (ctx.idb) bar.append(workspaceBlock(ctx, { id: key }));
-
   const citeBox = el(doc, 'details', { class: 'cite' });
   citeBox.append(el(doc, 'summary', { text: t('cite_button') }));
   citeBox.append(
@@ -77,6 +85,17 @@ export function actions(ctx, { key, title, cite }) {
     );
   }
   citeBox.append(copyButton(ctx, t('cite_copy'), () => `${cite.work}\n\n${platform}`));
+  return { citeBox, platform };
+}
+
+/**
+ * Notes, Print, Ask AI and Report for a record or source, with Cite unless the page shows it higher up (`citeShown`, from citeBlock).
+ */
+export function actions(ctx, { key, title, cite, citeShown = null }) {
+  const { doc, t, data } = ctx;
+  const bar = el(doc, 'div', { class: 'actions' });
+  if (ctx.idb) bar.append(workspaceBlock(ctx, { id: key }));
+  const { citeBox, platform } = citeShown ?? citeBlock(ctx, { key, cite });
 
   const reportBox = el(doc, 'details', { class: 'report' });
   reportBox.append(el(doc, 'summary', { text: t('report_button') }));
@@ -125,7 +144,7 @@ export function actions(ctx, { key, title, cite }) {
   );
   bar.append(el(doc, 'p', { class: 'print-row' }, print), printed);
   const ask = askAiBlock(ctx, { id: key });
-  bar.append(citeBox, ...(ask ? [ask] : []), reportBox);
+  bar.append(...(citeShown ? [] : [citeBox]), ...(ask ? [ask] : []), reportBox);
   return bar;
 }
 
@@ -171,18 +190,37 @@ const plainTitle = (title) => {
   return text === '' || text === 'null' ? null : text;
 };
 
-/** A small "open my copy at p. N" button for a claim or quotation; null when the reader's copy cannot be opened at a page. */
+/**
+ * A small "open my copy at p. N" button for a claim or quotation; null when the reader's copy cannot be opened at a page. It carries both
+ * the full words and a short "Open ↗" or "Find ↗": the desktop layout shows the short ones, with the full words as the tooltip and as the
+ * button's name for screen readers.
+ */
 function openAtPage(ctx, sourceId, page, quoteId = null) {
   const { doc, t } = ctx;
   const found = quoteId !== null && isLocated(ctx.myLibrary, quoteId);
   if (!found && (page === null || positionKind(ctx.myLibrary, sourceId) !== 'page')) return null;
   const status = el(doc, 'span', { class: 'hint', role: 'status' });
-  const button = el(doc, 'button', {
-    type: 'button',
-    class: 'open-at',
-    ...(found ? { 'data-quote': quoteId } : { 'data-page': String(page) }),
-    text: found ? t('lib_open_quote') : t('lib_open_page', { page }),
-  });
+  const label = found ? t('lib_open_quote') : t('lib_open_page', { page });
+  const button = el(
+    doc,
+    'button',
+    {
+      type: 'button',
+      class: 'open-at',
+      ...(found ? { 'data-quote': quoteId } : { 'data-page': String(page) }),
+      'aria-label': label,
+      'data-tip': label,
+    },
+    el(doc, 'span', { class: 'open-long', text: label }),
+    el(
+      doc,
+      'span',
+      { class: 'open-short' },
+      found ? t('lib_find_short') : t('lib_open_short'),
+      // The text form of the arrow, never the coloured emoji.
+      el(doc, 'span', { 'aria-hidden': 'true', text: ' \u2197\uFE0E' }),
+    ),
+  );
   button.addEventListener('click', async () => {
     status.textContent = '';
     const result = await openCopy(ctx.myLibrary, sourceId, {
@@ -190,6 +228,8 @@ function openAtPage(ctx, sourceId, page, quoteId = null) {
       baseUrl: ctx.baseUrl,
     });
     status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
+    // The good news goes away by itself; a failure stays until the next try.
+    if (result.ok) setTimeout(() => (status.textContent = ''), 4000);
   });
   return el(doc, 'span', { class: 'open-at-wrap' }, ' ', button, ' ', status);
 }
@@ -211,7 +251,7 @@ function claimsList(ctx, record) {
     if (claimOpen) item.append(claimOpen);
     list.append(item);
   }
-  return list;
+  return linkMentions(ctx, list, record.source ?? record.key);
 }
 
 /** Claims and quotations of a record, each with its id, its locator and the locator's verification status. */
@@ -227,17 +267,36 @@ function unitsOf(ctx, record, { claimsInFields = false } = {}) {
   const quotes = data.quotationsOf(record.key);
   if (quotes.length > 0) {
     out.push(el(doc, 'h2', { text: t('record_quotations') }));
+    // Said once for the whole list, not after every quotation.
+    if (record.verification?.quotations !== 'print_checked')
+      out.push(el(doc, 'p', { class: 'hint', id: 'quotations-note', text: t('quotations_check_print') }));
     const list = el(doc, 'ul', { id: 'record-quotations' });
     for (const q of quotes) {
-      const item = el(doc, 'li', { id: q.id });
-      item.append(el(doc, 'q', { text: q.text }));
-      if (q.locator) item.append(` (${q.locator})`);
-      item.append(' ', badge(doc, t, 'verification', record.verification?.quotations ?? 'unstated'));
+      const line = el(doc, 'div', { class: 'quote-line' }, el(doc, 'q', { text: q.text }));
+      const where = locatorText(q);
+      if (where) line.append(` (${where})`);
+      const item = el(
+        doc,
+        'li',
+        { id: q.id },
+        line,
+        ' ',
+        badge(doc, t, 'verification', record.verification?.quotations ?? 'unstated'),
+      );
+      // Under the quotation: what its caveat adds, and the way into the reader's own copy.
       const caveat = caveatText(q);
-      if (caveat) item.append(' — ', richText(doc, caveat));
-      if (q.limitedBy) item.append(` ${t('quotation_shortened')}`);
-      const quoteOpen = openAtPage(ctx, record.source ?? record.key, pageFromLocator(q.locator), q.id);
-      if (quoteOpen) item.append(quoteOpen);
+      const notes = [caveat, q.limitedBy ? t('quotation_shortened') : ''].filter(Boolean).join(' ');
+      const open = openAtPage(ctx, record.source ?? record.key, pageFromLocator(q.locator), q.id);
+      if (notes !== '' || open)
+        item.append(
+          el(
+            doc,
+            'div',
+            { class: 'quote-meta' },
+            notes === '' ? null : linkMentions(ctx, richText(doc, notes), record.source ?? record.key),
+            open,
+          ),
+        );
       list.append(item);
     }
     out.push(list);
@@ -255,7 +314,8 @@ function editionHistory(ctx, citation) {
   const { t } = ctx;
   const d = citation.dates ?? {};
   const lines = [];
-  if (d.original) lines.push(t('edition_original', { year: d.original }));
+  const first = yearOf(d.original);
+  lines.push(first === null ? t('pub_no_first_date') : t('edition_original', { year: first }));
   if (d.edition) lines.push(t('edition_edition', { year: d.edition.year, label: d.edition.label ?? '' }).trim());
   if (d.reprints?.length) lines.push(t('edition_reprints', { years: d.reprints.join(', ') }));
   if (d.digital_printing) lines.push(t('edition_digital', { year: d.digital_printing }));
@@ -263,44 +323,43 @@ function editionHistory(ctx, citation) {
   return lines;
 }
 
+/** "Open my copy" (and, for a chapter, "open at this chapter") with its status line, or null when there is no file to open. */
+function openCopyControls(ctx, sourceId, section = null) {
+  const { doc, t } = ctx;
+  const format = openFormat(ctx.myLibrary, sourceId);
+  if (format === null) return null;
+  const status = el(doc, 'p', { id: 'my-copies-status', class: 'hint', role: 'status' });
+  const opener = (id, label, options) => {
+    const button = el(doc, 'button', { type: 'button', id, text: label });
+    button.addEventListener('click', async () => {
+      status.textContent = '';
+      const result = await openCopy(ctx.myLibrary, sourceId, { ...options, baseUrl: ctx.baseUrl });
+      status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
+    });
+    return button;
+  };
+  const row = el(doc, 'p', {}, opener('open-my-copy', t('lib_open', { format: format.toUpperCase() }), {}));
+  if (section !== null && positionKind(ctx.myLibrary, sourceId) === 'section')
+    row.append(' ', opener('open-my-chapter', t('lib_open_chapter'), { section }));
+  return el(doc, 'div', { class: 'open-copy' }, row, status);
+}
+
 /**
  * "My copies": links that open the reader's own copy in Zotero or Calibre, shown only when the private library map is available (on the
- * reader's own machine). The links open programs on this computer; the browser may ask permission the first time.
+ * reader's own machine). The links open programs on this computer; the browser may ask permission the first time. A page that shows the
+ * open button higher up asks for the rest only (`open: false`); null when there is nothing to show.
  */
-export function myCopiesBlock(ctx, sourceId, { section = null } = {}) {
+export function myCopiesBlock(ctx, sourceId, { section = null, open = true } = {}) {
   const { doc, t } = ctx;
   const links = linksFor(ctx.myLibrary, sourceId);
-  const format = openFormat(ctx.myLibrary, sourceId);
-  if (links.length === 0 && format === null) return null;
+  const controls = open ? openCopyControls(ctx, sourceId, section) : null;
+  if (links.length === 0 && controls === null) return null;
   const box = el(doc, 'section', { id: 'my-copies', class: 'my-copies', 'aria-labelledby': 'my-copies-heading' });
   box.append(
     el(doc, 'h2', { id: 'my-copies-heading', text: t('lib_title') }),
     el(doc, 'p', { class: 'hint', text: t('lib_note') }),
+    controls ?? '',
   );
-  const status = el(doc, 'p', { id: 'my-copies-status', class: 'hint', role: 'status' });
-  if (format !== null) {
-    const button = el(doc, 'button', {
-      type: 'button',
-      id: 'open-my-copy',
-      text: t('lib_open', { format: format.toUpperCase() }),
-    });
-    button.addEventListener('click', async () => {
-      status.textContent = '';
-      const result = await openCopy(ctx.myLibrary, sourceId, { baseUrl: ctx.baseUrl });
-      status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
-    });
-    const row = el(doc, 'p', {}, button);
-    if (section !== null && positionKind(ctx.myLibrary, sourceId) === 'section') {
-      const chapter = el(doc, 'button', { type: 'button', id: 'open-my-chapter', text: t('lib_open_chapter') });
-      chapter.addEventListener('click', async () => {
-        status.textContent = '';
-        const result = await openCopy(ctx.myLibrary, sourceId, { section, baseUrl: ctx.baseUrl });
-        status.textContent = result.ok ? t('lib_opened') : t('lib_failed');
-      });
-      row.append(' ', chapter);
-    }
-    box.append(row);
-  }
   for (const l of links) {
     box.append(
       el(
@@ -311,11 +370,13 @@ export function myCopiesBlock(ctx, sourceId, { section = null } = {}) {
       ),
     );
   }
-  box.append(status);
   return box;
 }
 
-/** The publication landing page (D11): header, argument at a glance, chapters, intellectual content, reception, development. */
+/**
+ * The publication landing page (D11, reordered by D95): the citation with authors, Cite and Open my copy; the argument at a glance;
+ * chapters (or claims and quotations); intellectual content; reception; development; publication data; my copies; notes.
+ */
 export function renderPublication(ctx, id) {
   const { doc, t, data } = ctx;
   const source = data.sources.get(id);
@@ -351,45 +412,33 @@ export function renderPublication(ctx, id) {
     ),
   );
 
+  const cite = {
+    work: chicagoWork(citation),
+    platformTitle: citation.title ?? source.displayTitle ?? id,
+    verification: own?.verification,
+  };
+  const citing = citeBlock(ctx, { key: id, cite });
+  const rows = (listId) => {
+    const dl = el(doc, 'dl', { id: listId });
+    const row = (label, ...value) => dl.append(el(doc, 'dt', { text: label }), el(doc, 'dd', {}, ...value));
+    return { dl, row };
+  };
   main.append(el(doc, 'h2', { text: t('pub_details') }));
-  main.append(el(doc, 'p', { id: 'bibliography', class: 'citation', text: chicagoWork(citation) }));
-  const dl = el(doc, 'dl', { id: 'pub-details' });
-  const row = (label, ...value) => dl.append(el(doc, 'dt', { text: label }), el(doc, 'dd', {}, ...value));
-  if (citation.creators?.length) row(t('pub_creators'), creatorsText(citation));
-  const history = editionHistory(ctx, citation);
-  if (history.length)
-    row(
-      t('pub_editions'),
-      el(
-        doc,
-        'ul',
-        {},
-        history.map((h) => el(doc, 'li', { text: h })),
-      ),
-    );
-  if (citation.publication?.publisher)
-    row(t('pub_publisher'), [citation.publication.place, citation.publication.publisher].filter(Boolean).join(': '));
-  row(
-    t('pub_rights'),
-    t('pub_rights_value', {
-      state: t(`badge_state_${source.state}`),
-      class: t(`rights_class_${source.class ?? 'undecided'}`),
-    }),
-  );
-  if (own)
-    row(
-      t('pub_verification'),
-      badge(doc, t, 'verification', own.verification?.quotations ?? 'unstated'),
-      ' ',
-      badge(doc, t, 'pages', own.verification?.pages ?? 'unstated'),
-    );
-  main.append(dl);
-  const copies = myCopiesBlock(ctx, id);
-  if (copies) main.append(copies);
+  main.append(el(doc, 'p', { id: 'bibliography', class: 'citation', text: cite.work }));
+  const details = rows('pub-details');
+  if (citation.creators?.length) details.row(t('pub_creators'), creatorsText(citation));
+  const copy = openCopyControls(ctx, id);
+  main.append(details.dl, el(doc, 'div', { class: 'top-actions' }, citing.citeBox, copy));
 
   if (own) {
-    const glance = GLANCE_FIELDS.map((name) => own.fields.find((f) => f.name === name)).find(Boolean);
-    if (glance) main.append(el(doc, 'h2', { text: t('pub_glance') }), textBlock(doc, glance.value, { id: 'glance' }));
+    // A record may qualify the field's name ("… (up to 250 words)"), so a closing parenthesis is set aside.
+    const plainName = (f) => f.name.replace(/\s*\([^()]*\)\s*$/, '');
+    const glance = GLANCE_FIELDS.map((name) => own.fields.find((f) => plainName(f) === name)).find(Boolean);
+    if (glance)
+      main.append(
+        el(doc, 'h2', { text: t('pub_glance') }),
+        linkMentions(ctx, textBlock(doc, glance.value, { id: 'glance' }), id),
+      );
   }
 
   if (chapters.length > 0) {
@@ -445,47 +494,113 @@ export function renderPublication(ctx, id) {
     }
   }
 
+  // Reception and development appear when something is recorded.
   const reception = relatedSection(doc, ctx, data.reception(id), { title: t('pub_reception') });
-  main.append(
-    reception ??
-      el(
-        doc,
-        'section',
-        {},
-        el(doc, 'h2', { text: t('pub_reception') }),
-        el(doc, 'p', { class: 'hint', text: t('pub_nothing_yet') }),
-      ),
-  );
+  if (reception) main.append(reception);
   const development = relatedSection(doc, ctx, data.development(id), { title: t('pub_development') });
   if (development) {
     development.querySelector('[id]')?.setAttribute('id', 'development-heading');
     main.append(development);
-  } else
-    main.append(
+  }
+
+  main.append(el(doc, 'h2', { text: t('pub_data') }));
+  const published = rows('pub-data');
+  const history = editionHistory(ctx, citation);
+  if (history.length)
+    published.row(
+      t('pub_editions'),
       el(
         doc,
-        'section',
+        'ul',
         {},
-        el(doc, 'h2', { text: t('pub_development') }),
-        el(doc, 'p', { class: 'hint', text: t('pub_nothing_yet') }),
+        history.map((h) => el(doc, 'li', { text: h })),
       ),
     );
-
+  if (citation.publication?.publisher)
+    published.row(
+      t('pub_publisher'),
+      [citation.publication.place, citation.publication.publisher].filter(Boolean).join(': '),
+    );
+  published.row(
+    t('pub_rights'),
+    t('pub_rights_value', {
+      state: t(`badge_state_${source.state}`),
+      class: t(`rights_class_${source.class ?? 'undecided'}`),
+    }),
+  );
+  if (own)
+    published.row(
+      t('pub_verification'),
+      badge(doc, t, 'verification', own.verification?.quotations ?? 'unstated'),
+      ' ',
+      badge(doc, t, 'pages', own.verification?.pages ?? 'unstated'),
+    );
+  main.append(published.dl);
   const unique = main.querySelectorAll('[id="related-heading"]');
   unique.forEach((node, index) => index > 0 && node.removeAttribute('id'));
   main.append(metaLine(ctx, data.idsOfSource(id)));
-  main.append(
-    actions(ctx, {
-      key: id,
-      title: citation.title,
-      cite: {
-        work: chicagoWork(citation),
-        platformTitle: citation.title ?? source.displayTitle ?? id,
-        verification: own?.verification,
-      },
-    }),
-  );
+  const copies = myCopiesBlock(ctx, id, { open: false });
+  if (copies) main.append(copies);
+  main.append(actions(ctx, { key: id, title: citation.title, cite, citeShown: citing }));
   return main;
+}
+
+/**
+ * The way to the chapters before and after this one, in the order of the book's chapter list (D96): `top` and `foot` are labelled pairs,
+ * `sides` the two buttons that stay in the margins of a wide window (the stylesheet shows one set or the other). Null for a record that
+ * is not one of several chapters.
+ */
+function chapterSteps(ctx, record) {
+  const { doc, t, data } = ctx;
+  const chapters = data.chaptersOf(record.source);
+  const at = chapters.findIndex((c) => c.key === record.key);
+  if (at === -1 || chapters.length < 2) return null;
+  const steps = [
+    ['prev', chapters[at - 1]],
+    ['next', chapters[at + 1]],
+  ].filter(([, chapter]) => chapter !== undefined);
+  const title = (chapter) => chapter.title ?? chapterFallback(ctx, chapter);
+  const link = (way, chapter, attrs, ...children) =>
+    el(
+      doc,
+      'a',
+      { href: ctx.href(data.pathOf(chapter.key)), 'data-link': true, rel: way, class: `chapter-${way}`, ...attrs },
+      ...children,
+    );
+  const pair = (tag, attrs) =>
+    el(
+      doc,
+      tag,
+      attrs,
+      steps.map(([way, chapter]) =>
+        link(
+          way,
+          chapter,
+          {},
+          el(doc, 'span', { class: 'chapter-way', text: t(`chapter_${way}`) }),
+          ' ',
+          richText(doc, title(chapter)),
+        ),
+      ),
+    );
+  return {
+    top: pair('div', { class: 'chapter-steps chapter-steps-top' }),
+    foot: pair('nav', { class: 'chapter-steps chapter-steps-foot', 'aria-label': t('chapter_steps') }),
+    sides: el(
+      doc,
+      'div',
+      { class: 'chapter-sides' },
+      steps.map(([way, chapter]) => {
+        const name = `${t(`chapter_${way}_name`)}: ${title(chapter).replace(/\*/g, '')}`;
+        return link(
+          way,
+          chapter,
+          { 'aria-label': name, title: name },
+          el(doc, 'span', { 'aria-hidden': 'true', text: way === 'prev' ? '‹' : '›' }),
+        );
+      }),
+    ),
+  };
 }
 
 /** A chapter (or any record that is not the source-level one). */
@@ -509,6 +624,8 @@ export function renderChapter(ctx, key) {
       ),
     ),
   );
+  const steps = chapterSteps(ctx, record);
+  if (steps) main.append(steps.top, steps.sides);
   const cover = record.source ? coverOrPlaceholder(ctx, record.source, 'cover cover-small') : null;
   if (cover) main.append(cover);
   const recordHeading = el(
@@ -531,13 +648,22 @@ export function renderChapter(ctx, key) {
     for (const f of list) {
       dl.append(
         el(doc, 'dt', { text: f.name }),
-        el(doc, 'dd', {}, claimsField(f) ? claimsList(ctx, record) : textBlock(doc, f.value, {}, f.name)),
+        el(
+          doc,
+          'dd',
+          {},
+          claimsField(f)
+            ? claimsList(ctx, record)
+            : linkMentions(ctx, textBlock(doc, f.value, {}, f.name), record.source ?? record.key),
+        ),
       );
     }
     return dl;
   };
   const claimsInFields = content.some(claimsField);
   main.append(fieldList(content, 'record-fields'), ...unitsOf(ctx, record, { claimsInFields }));
+  // At the end of the chapter's own content, where a reader finishes.
+  if (steps) main.append(steps.foot);
   const copies = myCopiesBlock(ctx, record.source, { section: plainTitle(record.title) });
   if (copies) main.append(copies);
   const groups = data.related([key, ...data.claimsOf(key).map((c) => c.id)]);
@@ -584,7 +710,7 @@ export function claimItem(ctx, id) {
   if (claim === undefined) return el(doc, 'li', { text: id });
   const record = data.records.get(claim.record);
   li.append(
-    richText(doc, claim.text),
+    linkMentions(ctx, richText(doc, claim.text)),
     ' ',
     el(doc, 'a', {
       href: `${ctx.href(`/record/${encodeURIComponent(claim.record)}`)}#${encodeURIComponent(id)}`,
@@ -809,7 +935,16 @@ export function renderThinker(ctx, id) {
   if (p === undefined) return notFound(ctx);
   const main = el(doc, 'article');
   main.append(el(doc, 'h1', { id: 'page-heading', text: p.display_name ?? p.name }));
-  main.append(el(doc, 'p', { class: 'meta', text: [t(`kind_${p.kind}`), p.dates].filter(Boolean).join(' · ') }));
+  main.append(
+    el(
+      doc,
+      'p',
+      { class: 'meta' },
+      [t(`kind_${p.kind}`), p.dates].filter(Boolean).join(' · '),
+      // Dates a program or an AI drafted are marked until the owner confirms them.
+      p.dates && p.dates_status === 'suggested' ? [' ', badge(doc, t, 'status', 'suggested')] : null,
+    ),
+  );
   const mentions = data.related([id]);
   const isOdonovan = p.kind === 'o_donovan' || p.kind === 'subject';
   if (!isOdonovan) {
@@ -820,6 +955,8 @@ export function renderThinker(ctx, id) {
   }
   const works = personWorks(ctx, id);
   if (works) main.append(works);
+  const other = elsewhereSection(ctx, id);
+  if (other) main.append(other);
   const touching = [...data.arguments.values()].filter((a) => a.related?.thinkers?.includes(id));
   if (touching.length)
     main.append(
@@ -869,6 +1006,8 @@ export function renderScholar(ctx, id) {
   );
   const works = personWorks(ctx, id);
   main.append(works ?? el(doc, 'p', { class: 'hint', text: t('pub_nothing_yet') }));
+  const other = elsewhereSection(ctx, id);
+  if (other) main.append(other);
   const workIds = [...data.worksBy(id).values()].flat().map((r) => r.key);
   const engaged = data.related(workIds, {
     exclude: (other) => workIds.includes(other) || (data.sourceOfId(other) === null && !data.thinkers.has(other)),

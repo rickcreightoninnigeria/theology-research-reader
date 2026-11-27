@@ -13,6 +13,7 @@ export async function collectDiagnostics({
   persisted,
   serviceWorker,
   idb,
+  collections,
 }) {
   const userRecords = {};
   try {
@@ -29,14 +30,38 @@ export async function collectDiagnostics({
     serviceWorker: serviceWorker ?? null,
     locale,
     userRecords,
+    collections: collections ?? null,
     errors: (errors ?? []).map((e) => ({ at: e.at, context: e.context, name: e.name, message: e.message })),
   };
 }
 
 const mb = (bytes) => (bytes === null || bytes === undefined ? 'unknown' : `${(bytes / 1048576).toFixed(2)} MB`);
 
+/** The lines about the collections on this computer (D94). `when` writes a date for the reader. */
+function collectionLines({ collections, counted }, t, when) {
+  const lines = ['', t('diag_collections')];
+  for (const c of collections) {
+    const name = c.current ? t('diag_this_one', { name: c.title }) : c.title;
+    if (c.built === null) lines.push(`${name}: ${t('diag_not_built')}`);
+    else {
+      const parts = [
+        t('diag_built', { when: when(c.built) }),
+        c.records === null ? null : t('diag_records', { count: c.records }),
+        c.changed === null
+          ? t('diag_changed_unknown')
+          : c.changed === 0
+            ? t('diag_changed_none')
+            : t(c.changed === 1 ? 'diag_changed_one' : 'diag_changed', { count: c.changed }),
+      ];
+      lines.push(`${name}: ${parts.filter(Boolean).join('; ')}`);
+    }
+  }
+  if (counted !== null && counted !== undefined) lines.push(t('diag_counted', { when: when(counted) }));
+  return lines;
+}
+
 /** The copyable report. `t` supplies the labels so the report follows the interface language. */
-export function formatDiagnosticsReport(data, t) {
+export function formatDiagnosticsReport(data, t, when = (iso) => iso) {
   const lines = [t('diag_report_title'), ''];
   lines.push(`${t('diag_app_version')}: ${data.appVersion}`);
   if (data.collection === null) lines.push(`${t('diag_collection')}: ${t('diag_none')}`);
@@ -57,6 +82,7 @@ export function formatDiagnosticsReport(data, t) {
   lines.push(`${t('diag_service_worker')}: ${data.serviceWorker ?? t('diag_unknown')}`);
   lines.push(`${t('diag_language')}: ${data.locale.ui} / ${data.locale.content}`);
   lines.push(`${t('diag_user_records')}: ${data.userRecords.userdata ?? t('diag_unknown')}`);
+  if (data.collections) lines.push(...collectionLines(data.collections, t, when));
   lines.push('', t('diag_errors'));
   if (data.errors.length === 0) lines.push(t('diag_no_errors'));
   for (const e of data.errors) lines.push(`${e.at} ${e.context || e.name}: ${e.message}`);

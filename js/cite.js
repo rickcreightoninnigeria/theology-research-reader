@@ -45,7 +45,13 @@ const names = (list, inverted = true) => {
 
 const strip = (text) => String(text ?? '').replace(/\*/g, '');
 const end = (text) => (/[.?!]$/.test(text) ? text : `${text}.`);
-const year = (citation) => citation.dates?.original ?? citation.dates?.year ?? null;
+/** A year from a citation's date: a number, a string of digits, or an object with a `year`; otherwise null. */
+export function yearOf(value) {
+  const found = typeof value === 'object' && value !== null ? value.year : value;
+  return (typeof found === 'number' || typeof found === 'string') && /^\d{3,4}$/.test(found) ? Number(found) : null;
+}
+
+const year = (citation) => yearOf(citation.dates?.original) ?? yearOf(citation.dates?.year);
 
 function publication(citation) {
   const p = citation.publication ?? {};
